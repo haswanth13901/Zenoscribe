@@ -6,7 +6,7 @@ and changing '?' placeholders to '%s'.
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS recordings (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS failed_logins (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    username     TEXT NOT NULL,
+    ip           TEXT NOT NULL,
+    attempted_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_failed_logins_username_ip
+    ON failed_logins(username, ip, attempted_at);
+
 CREATE INDEX IF NOT EXISTS idx_rec_user ON recordings(user_id, started_at DESC);
 """
 
@@ -69,6 +79,48 @@ def init():
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _clean_login_key(value: str) -> str:
+    return value.strip().lower()
+
+
+def record_failed_login(username: str, ip: str):
+    conn = connect()
+    try:
+        now = _now()
+        conn.execute(
+            "INSERT INTO failed_logins (username, ip, attempted_at) VALUES (?, ?, ?)",
+            (_clean_login_key(username), ip or "", now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_failed_logins(username: str, ip: str):
+    conn = connect()
+    try:
+        conn.execute(
+            "DELETE FROM failed_logins WHERE username = ? AND ip = ?",
+            (_clean_login_key(username), ip or ""),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def count_recent_failed_logins(username: str, ip: str, window_sec: int):
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_sec)
+    conn = connect()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) AS n FROM failed_logins"
+            " WHERE username = ? AND ip = ? AND attempted_at >= ?",
+            (_clean_login_key(username), ip or "", cutoff.isoformat()),
+        ).fetchone()["n"]
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------- users
@@ -156,11 +208,32 @@ def touch_seen(user_id):
 def set_active(user_id, active: bool):
     conn = connect()
     try:
-        conn.execute(
-            "UPDATE users SET is_active = ? WHERE id = ?",
-            (1 if active else 0, user_id),
-        )
+        if active:
+            result = conn.execute(
+                "UPDATE users SET is_active = 1 WHERE id = ?",
+                (user_id,),
+            )
+        else:
+            result = conn.execute(
+                """
+                UPDATE users
+                SET is_active = 0
+                WHERE id = ?
+                  AND NOT (
+                      role = 'admin'
+                      AND is_active = 1
+                      AND (
+                          SELECT COUNT(*)
+                          FROM users
+                          WHERE role = 'admin'
+                            AND is_active = 1
+                      ) = 1
+                  )
+                """,
+                (user_id,),
+            )
         conn.commit()
+        return result.rowcount
     finally:
         conn.close()
 
@@ -178,7 +251,10 @@ def set_password(user_id, password_hash):
 
 
 def delete_user(user_id):
-    """Returns the recording file stems so the caller can unlink them."""
+    """Returns the recording file stems so the caller can unlink them.
+
+    The delete is conditional to avoid removing the last active admin.
+    """
     conn = connect()
     try:
         rows = conn.execute(
@@ -186,8 +262,26 @@ def delete_user(user_id):
             (user_id,),
         ).fetchall()
         files = [(r["wav_file"], r["txt_file"]) for r in rows]
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        result = conn.execute(
+            """
+            DELETE FROM users
+            WHERE id = ?
+              AND NOT (
+                  role = 'admin'
+                  AND is_active = 1
+                  AND (
+                      SELECT COUNT(*)
+                      FROM users
+                      WHERE role = 'admin'
+                        AND is_active = 1
+                  ) = 1
+              )
+            """,
+            (user_id,),
+        )
         conn.commit()
+        if result.rowcount == 0:
+            return None
         return files
     finally:
         conn.close()

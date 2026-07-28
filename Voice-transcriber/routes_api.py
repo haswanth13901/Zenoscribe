@@ -11,7 +11,7 @@ import os
 import tempfile
 
 from fastapi import (
-    APIRouter, Depends, File, HTTPException, UploadFile, status,
+    APIRouter, Depends, File, HTTPException, Request, UploadFile, status,
 )
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -54,14 +54,23 @@ class ActiveBody(BaseModel):
 
 
 @router.post("/api/login")
-async def login(body: LoginBody):
+async def login(body: LoginBody, request: Request):
+    client_ip = request.client.host if request.client else ""
+    if db.count_recent_failed_logins(body.username, client_ip, config.LOGIN_ATTEMPT_WINDOW_SEC) >= config.LOGIN_ATTEMPT_LIMIT:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many login attempts, try again later",
+        )
+
     row = db.get_user_by_username(body.username)
     # Same message either way so the response can't be used to discover
     # which usernames exist.
     if not row or not auth.verify_password(body.password, row["password_hash"]):
+        db.record_failed_login(body.username, client_ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     if not row["is_active"]:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is deactivated")
+    db.clear_failed_logins(body.username, client_ip)
     db.touch_login(row["id"])
     return {
         "token": auth.make_token(row),
@@ -109,10 +118,10 @@ async def admin_list_users(_=Depends(auth.current_admin)):
 
 @router.post("/api/admin/users")
 async def admin_create_user(body: NewUserBody, admin=Depends(auth.current_admin)):
-    if not body.username.strip() or len(body.password) < 8:
+    if not body.username.strip() or len(body.password) < auth.MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Username required and password must be at least 8 characters",
+            f"Username required and password must be at least {auth.MIN_PASSWORD_LENGTH} characters",
         )
     if body.role not in ("user", "admin"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role")
@@ -133,9 +142,10 @@ async def admin_create_user(body: NewUserBody, admin=Depends(auth.current_admin)
 async def admin_reset_password(
     user_id: str, body: PasswordBody, _=Depends(auth.current_admin)
 ):
-    if len(body.password) < 8:
+    if len(body.password) < auth.MIN_PASSWORD_LENGTH:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Password must be at least 8 characters"
+            status.HTTP_400_BAD_REQUEST,
+            f"Password must be at least {auth.MIN_PASSWORD_LENGTH} characters",
         )
     if not db.get_user(user_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
@@ -161,7 +171,13 @@ async def admin_set_active(
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "Cannot deactivate the last admin"
             )
-    db.set_active(user_id, body.is_active)
+        updated = db.set_active(user_id, body.is_active)
+        if not updated:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Cannot deactivate the last admin"
+            )
+    else:
+        db.set_active(user_id, body.is_active)
     return {"ok": True}
 
 
@@ -177,6 +193,10 @@ async def admin_delete_user(user_id: str, admin=Depends(auth.current_admin)):
             status.HTTP_400_BAD_REQUEST, "Cannot delete the last admin"
         )
     files = db.delete_user(user_id)
+    if files is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Cannot delete the last admin"
+        )
     for wav_name, txt_name in files:
         for name in (wav_name, txt_name):
             try:
@@ -264,15 +284,42 @@ async def remove_recording(rec_id: str, user=Depends(auth.current_user)):
 
 @router.post("/api/transcribe")
 async def transcribe_upload(
-    file: UploadFile = File(...), _=Depends(auth.current_user)
+    request: Request,
+    file: UploadFile = File(...),
+    _=Depends(auth.current_user),
 ):
     """Batch endpoint - upload a wav/mp3, get turns back."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > config.MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
+                )
+        except ValueError:
+            pass
+
     suffix = os.path.splitext(file.filename)[1] or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
+        size = 0
+        while True:
+            chunk = await file.read(64 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > config.MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
+                )
+            tmp.write(chunk)
         path = tmp.name
     try:
         turns = await asyncio.to_thread(sx.transcribe_file, path)
         return {"turns": turns}
     finally:
-        os.unlink(path)
+        try:
+            os.unlink(path)
+        except OSError:
+            log.exception("could not delete temp upload %s", path)

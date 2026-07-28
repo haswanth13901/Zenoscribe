@@ -1,5 +1,6 @@
 """JWT auth, password hashing, and role guards."""
 
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -7,12 +8,14 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 import db
 
 load_dotenv()
+log = logging.getLogger("auth")
+MIN_PASSWORD_LENGTH = 8
 
 # Generated if absent so first run works, but set it in .env for production -
 # a rotating secret invalidates every token on restart.
@@ -90,10 +93,18 @@ async def current_admin(user=Depends(current_user)):
     return user
 
 
-def user_from_ws(websocket: Request) -> object:
-    """WebSockets can't send Authorization headers from the browser,
-    so the token arrives as a query parameter instead."""
-    token = websocket.query_params.get("token", "")
+async def user_from_ws(websocket: WebSocket) -> object:
+    """Authenticate a WebSocket after the connection opens.
+
+    WebSockets cannot send Authorization headers from the browser, so the
+    client sends a short-lived auth frame after the socket opens instead of
+    embedding the JWT in the URL.
+    """
+    try:
+        payload = await websocket.receive_json()
+    except Exception:
+        return None
+    token = payload.get("token") if isinstance(payload, dict) else None
     return user_from_token(token) if token else None
 
 
@@ -104,6 +115,12 @@ def ensure_seed_admin():
     username = os.environ.get("ADMIN_USERNAME", "admin")
     password = os.environ.get("ADMIN_PASSWORD", "")
     generated = False
+    if password and len(password) < MIN_PASSWORD_LENGTH:
+        log.warning(
+            "ADMIN_PASSWORD is too weak; generating a secure password instead"
+        )
+        password = secrets.token_urlsafe(12)
+        generated = True
     if not password:
         password = secrets.token_urlsafe(12)
         generated = True

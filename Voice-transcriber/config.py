@@ -12,6 +12,16 @@ RECORDINGS.mkdir(exist_ok=True)
 
 STATIC_DIR = str(BASE_DIR / "static")
 
+# -------------------------------------------------------- auth settings
+# Protect /api/login from brute-force attempts.
+LOGIN_ATTEMPT_WINDOW_SEC = 300
+LOGIN_ATTEMPT_LIMIT = 5
+
+# Maximum batch upload size for /api/transcribe.
+# This is enforced on Content-Length when available and while streaming.
+MAX_UPLOAD_MB = 20
+MAX_UPLOAD_SIZE = MAX_UPLOAD_MB * 1024 * 1024
+
 # --------------------------------------------------- transcription tuning
 # These only affect the engine in transcribe.py. Adjust them there-and-only
 # there when tuning turn detection; nothing in the auth layer reads them.
