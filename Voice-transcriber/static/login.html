@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Zenoscribe</title>
+<style>
+  :root {
+    --bg:#0e0f13; --panel:#16181f; --line:#262932;
+    --text:#e6e8ee; --muted:#8b90a0; --accent:#6ea8fe; --err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif;
+    min-height:100vh;display:grid;place-items:center;padding:20px;
+  }
+  .card{
+    width:100%;max-width:360px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:28px;
+  }
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+  label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px}
+  input{
+    width:100%;background:#0e0f13;border:1px solid var(--line);
+    color:var(--text);padding:10px 12px;border-radius:7px;
+    font:inherit;font-size:14px;
+  }
+  input:focus{outline:none;border-color:var(--accent)}
+  button{
+    width:100%;margin-top:22px;background:var(--accent);color:#0b1220;
+    border:0;padding:11px;border-radius:7px;font:inherit;
+    font-weight:600;cursor:pointer;
+  }
+  button:disabled{opacity:.5;cursor:default}
+  .err{
+    color:var(--err);font-size:13px;margin-top:14px;min-height:18px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Zenoscribe</h1>
+  <div class="sub">Sign in to continue</div>
+
+  <label for="u">Username</label>
+  <input id="u" autocomplete="username" autofocus>
+
+  <label for="p">Password</label>
+  <input id="p" type="password" autocomplete="current-password">
+
+  <button id="go">Sign in</button>
+  <div class="err" id="err"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+
+async function signIn() {
+  const username = $('#u').value.trim();
+  const password = $('#p').value;
+  if (!username || !password) { $('#err').textContent = 'Enter both fields.'; return; }
+
+  $('#go').disabled = true;
+  $('#err').textContent = '';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Sign in failed');
+
+    sessionStorage.setItem('token', data.token);
+    sessionStorage.setItem('user', JSON.stringify(data.user));
+    location.href = data.user.role === 'admin' ? '/admin' : '/app';
+  } catch (e) {
+    $('#err').textContent = e.message;
+    $('#go').disabled = false;
+  }
+}
+
+$('#go').onclick = signIn;
+document.addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+</script>
+</body>
+</html>

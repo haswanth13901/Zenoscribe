@@ -1,0 +1,19 @@
+# Web framework & server
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+websockets==13.1
+python-multipart==0.0.12
+
+# Auth
+bcrypt==4.2.0
+PyJWT==2.9.0
+
+# Config & HTTP
+python-dotenv==1.0.1
+requests==2.32.3
+
+# Local mic capture (record.py / CLI only; not needed for the web app,
+# since the browser captures audio in that path)
+sounddevice==0.5.1
+numpy==2.1.3
+scipy==1.14.1
