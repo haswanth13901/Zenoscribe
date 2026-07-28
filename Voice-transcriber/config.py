@@ -6,10 +6,11 @@ paths without importing each other.
 
 from pathlib import Path
 
-RECORDINGS = Path("recordings")
+BASE_DIR = Path(__file__).parent
+RECORDINGS = BASE_DIR / "recordings"
 RECORDINGS.mkdir(exist_ok=True)
 
-STATIC_DIR = "static"
+STATIC_DIR = str(BASE_DIR / "static")
 
 # --------------------------------------------------- transcription tuning
 # These only affect the engine in transcribe.py. Adjust them there-and-only
