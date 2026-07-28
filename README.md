@@ -46,7 +46,7 @@ Fill it in:
 SONIOX_API_KEY=your_soniox_key
 JWT_SECRET=<generate below>
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=choose_a_strong_password
+ADMIN_PASSWORD=choose_a_strong_password  # must be at least 8 characters
 ```
 
 Generate a JWT secret:
@@ -66,7 +66,8 @@ uvicorn server:app --reload --port 8000
 
 Open http://localhost:8000. On first start, the admin account is created from
 `ADMIN_USERNAME` / `ADMIN_PASSWORD` (watch the log to confirm). If
-`ADMIN_PASSWORD` is blank, a password is generated and printed to the terminal.
+`ADMIN_PASSWORD` is blank or shorter than 8 characters, a strong random password
+is generated and printed to the terminal.
 
 - `/` or `/login` — sign in
 - `/app` — recorder (all users)
@@ -144,8 +145,9 @@ Neither is committed to git (see `.gitignore`).
   against the DB on each request, not just at expiry).
 - Guards prevent an admin from deactivating/deleting themselves or removing the
   last remaining admin.
-- The JWT rides in the WebSocket query string (browsers can't set headers on a
-  WebSocket). Query strings can appear in server/proxy logs and are readable
+- Live transcription authenticates on the first WebSocket frame after the
+  socket opens, so the JWT is not exposed in the URL/query string where it
+  could appear in server or proxy logs.
   over plain HTTP. **Put this behind HTTPS before deploying beyond localhost.**
 - Tokens live in `sessionStorage`, so closing the tab logs out. Switch to
   `localStorage` if you want sessions to persist.
