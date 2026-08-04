@@ -83,6 +83,9 @@
   <div class="field" id="oneway">
     <label>Translate into</label>
     <select id="target"></select>
+    <div style="font-size:11px;color:var(--muted);margin-top:5px;max-width:200px">
+      Speak a different language than this. The translation appears on the right.
+    </div>
   </div>
 
   <!-- two-way: a pair -->
@@ -103,6 +106,7 @@
   <label class="toggle"><input type="checkbox" id="speak" checked> Speak translation</label>
 
   <div class="spacer"></div>
+  <button id="restart" title="Clear the transcript and start a fresh session">Restart</button>
   <button id="toggle">Start</button>
 </div>
 
@@ -157,28 +161,40 @@ function playPCM(base64, rate) {
 
 // ---- captions ----
 function clearEmpty(el) { const e = el.querySelector('.empty'); if (e) e.remove(); }
-let srcPartial = null, tgtPartial = null;
 
-function appendText(streamEl, refHolder, text, final) {
+// The server sends the complete current text for each side every frame. The
+// browser simply replaces the live box - it never accumulates, so it cannot
+// duplicate. On utterance_end the live boxes are locked and cleared, so the
+// next utterance opens fresh boxes below.
+const srcHolder = { el: null };
+const tgtHolder = { el: null };
+
+function setLive(streamEl, holder, text) {
+  if (!text) return;
   clearEmpty(streamEl);
-  if (!refHolder.el || final && refHolder.wasFinal === false) {
-    // reuse the live partial line, or start a new one
+  if (!holder.el) {
+    holder.el = document.createElement('div');
+    holder.el.className = 'utt partial';
+    streamEl.appendChild(holder.el);
   }
-  if (!refHolder.el) {
-    refHolder.el = document.createElement('div');
-    refHolder.el.className = 'utt partial';
-    streamEl.appendChild(refHolder.el);
-  }
-  refHolder.el.textContent += text;
-  if (final) {
-    refHolder.el.classList.remove('partial');
-    refHolder.el = null;   // next token starts a fresh line
-  }
+  holder.el.textContent = text;
   streamEl.scrollTop = streamEl.scrollHeight;
 }
 
-const srcHolder = { el: null };
-const tgtHolder = { el: null };
+function closeUtterance() {
+  if (srcHolder.el) srcHolder.el.classList.remove('partial');
+  if (tgtHolder.el) tgtHolder.el.classList.remove('partial');
+  srcHolder.el = null;
+  tgtHolder.el = null;
+}
+
+// Empty both boxes back to their placeholder state and reset caption holders.
+function clearTranscript() {
+  srcHolder.el = null;
+  tgtHolder.el = null;
+  $('#srcStream').innerHTML = '<div class="empty">Source speech appears here.</div>';
+  $('#tgtStream').innerHTML = '<div class="empty">Translation appears here.</div>';
+}
 
 // ---- language options ----
 async function loadOptions() {
@@ -189,7 +205,7 @@ async function loadOptions() {
   $('#langA').innerHTML = opts;
   $('#langB').innerHTML = opts;
   $('#voice').innerHTML = voices.map(v => `<option>${v}</option>`).join('');
-  $('#target').value = 'es';
+  $('#target').value = 'en';
   $('#langA').value = 'en';
   $('#langB').value = 'es';
 }
@@ -238,16 +254,15 @@ async function start() {
       $('#toggle').classList.add('rec');
       $('#status').textContent = 'listening'; $('#status').className = 'live';
       lockControls(true);
-    } else if (m.type === 'source') {
-      appendText($('#srcStream'), srcHolder, m.text, m.final);
-    } else if (m.type === 'translation') {
-      appendText($('#tgtStream'), tgtHolder, m.text, m.final);
+    } else if (m.type === 'captions') {
+      setLive($('#srcStream'), srcHolder, m.source);
+      setLive($('#tgtStream'), tgtHolder, m.translation);
     } else if (m.type === 'audio') {
       playPCM(m.pcm, 24000);
     } else if (m.type === 'audio_start') {
       // could show a speaking indicator
     } else if (m.type === 'utterance_end') {
-      srcHolder.el = null; tgtHolder.el = null;
+      closeUtterance();
     } else if (m.type === 'error') {
       $('#status').textContent = 'error: ' + m.message;
       stop();
@@ -267,6 +282,8 @@ function stop() {
   if (node) node.disconnect();
   if (ctx) ctx.close();
   if (stream) stream.getTracks().forEach(t => t.stop());
+  // Stop any queued TTS audio so it doesn't keep speaking after Stop/Restart.
+  if (playCtx) { try { playCtx.close(); } catch {} playCtx = null; playHead = 0; }
   setTimeout(() => { if (ws && ws.readyState === 1) ws.close(); }, 300);
   $('#toggle').textContent = 'Start';
   $('#toggle').classList.remove('rec');
@@ -283,6 +300,25 @@ $('#toggle').onclick = () => {
   $('#toggle').disabled = true;
   start().catch(err => { $('#status').textContent = 'mic error: ' + err.message; })
          .finally(() => { $('#toggle').disabled = false; });
+};
+
+// Restart: wipe the transcript and begin a clean session. If one is running,
+// stop it first, then start again once teardown settles.
+$('#restart').onclick = async () => {
+  const wasRunning = running;
+  if (wasRunning) stop();
+  clearTranscript();
+  if (wasRunning) {
+    $('#status').textContent = 'restarting';
+    $('#restart').disabled = true;
+    setTimeout(() => {
+      start()
+        .catch(err => { $('#status').textContent = 'mic error: ' + err.message; })
+        .finally(() => { $('#restart').disabled = false; });
+    }, 400);
+  } else {
+    $('#status').textContent = 'cleared';
+  }
 };
 
 $('#out').onclick = () => { sessionStorage.clear(); location.href = '/login'; };
