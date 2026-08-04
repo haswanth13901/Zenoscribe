@@ -31,6 +31,10 @@ import soniox_client as sx
 
 log = logging.getLogger("translate")
 
+# Flip to True to log every token Soniox returns (status/lang/final/text).
+# Use it to confirm whether translation tokens are actually arriving.
+DEBUG_TOKENS = True
+
 router = APIRouter()
 
 # Cap the concurrent target-language TTS streams we open per session, so a
@@ -127,6 +131,11 @@ async def translate(client: WebSocket):
             # Translation tokens are accumulated per utterance and spoken when
             # the utterance closes (endpoint token), so TTS gets whole phrases.
             pending_speech = {"text": "", "lang": None}
+            # Fallback boundary: if Soniox sends no endpoint marker, close an
+            # utterance after this much quiet so boxes don't grow forever.
+            last_token_at = {"t": None}
+            IDLE_CLOSE = 1.2
+            loop = asyncio.get_event_loop()
 
             async def speak_utterance():
                 text = pending_speech["text"].strip()
@@ -142,6 +151,14 @@ async def translate(client: WebSocket):
                     to_browser=to_browser,
                 )
 
+            # Accumulate finalized text server-side, exactly like the working
+            # transcription engine. Each Soniox payload carries the full set of
+            # current non-final tokens, so partials are rebuilt every frame and
+            # never accumulated. The browser receives the complete current text
+            # and just displays it - no client-side concatenation.
+            src_final = {"text": ""}
+            tgt_final = {"text": ""}
+
             async def pump_stt():
                 async for raw in stt:
                     payload = json.loads(raw)
@@ -152,49 +169,82 @@ async def translate(client: WebSocket):
                         })
                         continue
 
+                    endpoint = bool(payload.get("is_endpoint") or payload.get("endpoint"))
+
+                    # Rebuilt fresh from this payload's non-final tokens.
+                    src_partial = ""
+                    tgt_partial = ""
+
                     for tok in payload.get("tokens", []):
                         text = tok.get("text", "")
                         status = tok.get("translation_status")  # original|translation|none
                         lang = tok.get("language")
 
-                        # End-of-utterance marker from endpoint detection.
-                        if text == "<end>" or tok.get("is_end"):
-                            await speak_utterance()
-                            await to_browser({"type": "utterance_end"})
+                        if DEBUG_TOKENS and text:
+                            log.info("TOK status=%s lang=%s final=%s %r",
+                                     status, lang, tok.get("is_final"), text)
+
+                        if text in ("<end>", "<fin>") or tok.get("is_end") \
+                                or tok.get("is_endpoint"):
+                            endpoint = True
                             continue
 
                         if not text:
                             continue
 
+                        is_final = bool(tok.get("is_final"))
                         if status == "translation":
-                            # This is the translated side: show it, and buffer
-                            # it to be spoken at the utterance boundary.
-                            await to_browser({
-                                "type": "translation",
-                                "text": text,
-                                "language": lang,
-                                "final": bool(tok.get("is_final")),
-                            })
-                            if tok.get("is_final"):
+                            if is_final:
+                                tgt_final["text"] += text
                                 pending_speech["text"] += text
                                 if lang:
                                     pending_speech["lang"] = lang
+                            else:
+                                tgt_partial += text
                         else:
-                            # Original / transcription side: captions only.
-                            await to_browser({
-                                "type": "source",
-                                "text": text,
-                                "language": lang,
-                                "final": bool(tok.get("is_final")),
-                            })
+                            if is_final:
+                                src_final["text"] += text
+                            else:
+                                src_partial += text
+
+                        last_token_at["t"] = loop.time()
+
+                    # Send the complete current text for each side. The browser
+                    # replaces its box contents with this - no accumulation.
+                    await to_browser({
+                        "type": "captions",
+                        "source": (src_final["text"] + src_partial).strip(),
+                        "translation": (tgt_final["text"] + tgt_partial).strip(),
+                    })
+
+                    if endpoint:
+                        await speak_utterance()
+                        await to_browser({"type": "utterance_end"})
+                        src_final["text"] = ""
+                        tgt_final["text"] = ""
 
                 # Stream closed: speak anything still buffered.
                 await speak_utterance()
 
+            async def idle_watchdog():
+                # Close an utterance after a quiet gap, in case no endpoint
+                # marker arrives. Sending utterance_end when nothing is pending
+                # is harmless - the browser just has no open box to close.
+                while True:
+                    await asyncio.sleep(0.3)
+                    t = last_token_at["t"]
+                    if t is not None and (loop.time() - t) > IDLE_CLOSE:
+                        last_token_at["t"] = None
+                        await speak_utterance()
+                        await to_browser({"type": "utterance_end"})
+
+            watchdog_task = asyncio.create_task(idle_watchdog())
             try:
                 await asyncio.gather(pump_mic(), pump_stt())
             except ConnectionClosedOK:
                 pass
+            finally:
+                watchdog_task.cancel()
 
     except WebSocketDisconnect:
         log.info("translate client disconnected")
