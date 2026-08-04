@@ -81,6 +81,61 @@ def rt_config(sample_rate=16000, language_hints=None):
     return cfg
 
 
+# --------------------------------------------------------------- translation
+
+TTS_WS_URL = "wss://tts-rt.soniox.com/tts-websocket"
+TTS_MODEL = "tts-rt-v1"
+TTS_SAMPLE_RATE = 24000  # Soniox TTS default for pcm_s16le
+
+
+def translate_stt_config(mode, target_language=None, language_a=None,
+                         language_b=None, sample_rate=16000):
+    """STT config with a translation block.
+
+    mode 'one_way': detected speech -> target_language.
+    mode 'two_way': bidirectional between language_a and language_b.
+
+    Endpoint detection is on so each utterance closes promptly, which is what
+    lets the TTS side speak one sentence at a time.
+    """
+    cfg = {
+        "api_key": get_api_key(),
+        "model": RT_MODEL,
+        "audio_format": "pcm_s16le",
+        "sample_rate": sample_rate,
+        "num_channels": 1,
+        "enable_language_identification": True,
+        "enable_endpoint_detection": True,
+    }
+    if mode == "one_way":
+        cfg["translation"] = {
+            "type": "one_way",
+            "target_language": target_language,
+        }
+    elif mode == "two_way":
+        cfg["translation"] = {
+            "type": "two_way",
+            "language_a": language_a,
+            "language_b": language_b,
+        }
+    else:
+        raise ValueError(f"unknown translation mode: {mode}")
+    return cfg
+
+
+def tts_config(voice, language, stream_id, sample_rate=TTS_SAMPLE_RATE):
+    """One TTS stream config message. One stream per utterance."""
+    return {
+        "api_key": get_api_key(),
+        "model": TTS_MODEL,
+        "language": language,
+        "voice": voice,
+        "audio_format": "pcm_s16le",
+        "sample_rate": sample_rate,
+        "stream_id": stream_id,
+    }
+
+
 def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, language_hints=("en",)):
     """Upload a file, wait for the job, return merged speaker turns."""
     with open(path, "rb") as f:

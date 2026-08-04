@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Translate — Zenoscribe</title>
+<style>
+  :root {
+    --bg:#0e0f13; --panel:#16181f; --line:#262932;
+    --text:#e6e8ee; --muted:#8b90a0; --accent:#6ea8fe;
+    --src:#7ddba3; --tgt:#6ea8fe; --rec:#ef4444;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif;
+    height:100vh; display:flex; flex-direction:column; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; }
+  h1 { font-size:15px; font-weight:600; margin:0; }
+  .spacer { flex:1; }
+  .who { font-size:13px; color:var(--muted); }
+  button { background:var(--panel); color:var(--text); border:1px solid var(--line);
+    padding:8px 16px; border-radius:7px; font:inherit; font-size:14px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:#3a3f4d; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.rec { background:var(--rec); border-color:var(--rec); color:#fff; }
+  #status { font-size:13px; color:var(--muted); }
+  #status.live::before { content:''; display:inline-block; width:7px; height:7px;
+    background:var(--rec); border-radius:50%; margin-right:7px; animation:pulse 1.4s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+
+  .controls { padding:16px 20px; border-bottom:1px solid var(--line);
+    display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+  .field label { display:block; font-size:11px; text-transform:uppercase;
+    letter-spacing:.4px; color:var(--muted); margin-bottom:6px; }
+  select { background:#0e0f13; border:1px solid var(--line); color:var(--text);
+    padding:9px 11px; border-radius:7px; font:inherit; font-size:14px; min-width:150px; }
+  select:focus { outline:none; border-color:var(--accent); }
+  .modes { display:flex; gap:6px; }
+  .modes button.on { background:var(--accent); color:#0b1220; border-color:var(--accent); font-weight:600; }
+  .toggle { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+  #twoway { display:none; }
+  body[data-mode="two_way"] #twoway { display:contents; }
+  body[data-mode="two_way"] #oneway { display:none; }
+
+  main { flex:1; overflow-y:auto; padding:22px; }
+  .cols { max-width:900px; margin:0 auto; display:grid;
+    grid-template-columns:1fr 1fr; gap:18px; }
+  .col h2 { font-size:11px; text-transform:uppercase; letter-spacing:.4px;
+    margin:0 0 10px; }
+  .col.src h2 { color:var(--src); }
+  .col.tgt h2 { color:var(--tgt); }
+  .stream { border:1px solid var(--line); border-radius:10px; padding:16px;
+    min-height:120px; background:var(--panel); font-size:16px; line-height:1.6; }
+  .partial { color:var(--muted); }
+  .utt { margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,.05); }
+  .utt:last-child { border-bottom:0; margin-bottom:0; }
+  .empty { color:var(--muted); text-align:center; padding:40px 0; font-size:14px; }
+  @media (max-width:720px){ .cols{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body data-mode="one_way">
+
+<header>
+  <h1>Zenoscribe · Translate</h1>
+  <span id="status">idle</span>
+  <span class="spacer"></span>
+  <span class="who" id="who"></span>
+  <button onclick="location.href='/app'">Recorder</button>
+  <button id="out">Sign out</button>
+</header>
+
+<div class="controls">
+  <div class="field">
+    <label>Mode</label>
+    <div class="modes">
+      <button id="mOne" class="on">Auto-detect → one language</button>
+      <button id="mTwo">Two-way</button>
+    </div>
+  </div>
+
+  <!-- one-way: only a target -->
+  <div class="field" id="oneway">
+    <label>Translate into</label>
+    <select id="target"></select>
+  </div>
+
+  <!-- two-way: a pair -->
+  <div class="field" id="twoway">
+    <label>Language A</label>
+    <select id="langA"></select>
+  </div>
+  <div class="field" id="twoway">
+    <label>Language B</label>
+    <select id="langB"></select>
+  </div>
+
+  <div class="field">
+    <label>Voice</label>
+    <select id="voice"></select>
+  </div>
+
+  <label class="toggle"><input type="checkbox" id="speak" checked> Speak translation</label>
+
+  <div class="spacer"></div>
+  <button id="toggle">Start</button>
+</div>
+
+<main>
+  <div class="cols">
+    <div class="col src">
+      <h2>Heard</h2>
+      <div class="stream" id="srcStream"><div class="empty">Source speech appears here.</div></div>
+    </div>
+    <div class="col tgt">
+      <h2>Translation</h2>
+      <div class="stream" id="tgtStream"><div class="empty">Translation appears here.</div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const token = sessionStorage.getItem('token');
+const me = JSON.parse(sessionStorage.getItem('user') || 'null');
+if (!token || !me) location.href = '/login';
+if (me) $('#who').textContent = me.username;
+
+let ws, ctx, node, stream, running = false;
+let mode = 'one_way';
+
+// ---- audio playback queue (PCM16 @ 24k from Soniox TTS) ----
+let playCtx = null;
+let playHead = 0;         // scheduling cursor
+function ensurePlayCtx(rate) {
+  if (!playCtx) playCtx = new AudioContext({ sampleRate: rate || 24000 });
+  return playCtx;
+}
+function playPCM(base64, rate) {
+  const ac = ensurePlayCtx(rate);
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const view = new DataView(bytes.buffer);
+  const n = Math.floor(bytes.length / 2);
+  const buf = ac.createBuffer(1, n, ac.sampleRate);
+  const ch = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
+  const srcNode = ac.createBufferSource();
+  srcNode.buffer = buf;
+  srcNode.connect(ac.destination);
+  const now = ac.currentTime;
+  if (playHead < now) playHead = now;
+  srcNode.start(playHead);
+  playHead += buf.duration;
+}
+
+// ---- captions ----
+function clearEmpty(el) { const e = el.querySelector('.empty'); if (e) e.remove(); }
+let srcPartial = null, tgtPartial = null;
+
+function appendText(streamEl, refHolder, text, final) {
+  clearEmpty(streamEl);
+  if (!refHolder.el || final && refHolder.wasFinal === false) {
+    // reuse the live partial line, or start a new one
+  }
+  if (!refHolder.el) {
+    refHolder.el = document.createElement('div');
+    refHolder.el.className = 'utt partial';
+    streamEl.appendChild(refHolder.el);
+  }
+  refHolder.el.textContent += text;
+  if (final) {
+    refHolder.el.classList.remove('partial');
+    refHolder.el = null;   // next token starts a fresh line
+  }
+  streamEl.scrollTop = streamEl.scrollHeight;
+}
+
+const srcHolder = { el: null };
+const tgtHolder = { el: null };
+
+// ---- language options ----
+async function loadOptions() {
+  const r = await fetch('/api/languages', { headers: { 'Authorization': 'Bearer ' + token } });
+  const { languages, voices } = await r.json();
+  const opts = languages.map(l => `<option value="${l.code}">${l.name}</option>`).join('');
+  $('#target').innerHTML = opts;
+  $('#langA').innerHTML = opts;
+  $('#langB').innerHTML = opts;
+  $('#voice').innerHTML = voices.map(v => `<option>${v}</option>`).join('');
+  $('#target').value = 'es';
+  $('#langA').value = 'en';
+  $('#langB').value = 'es';
+}
+
+// ---- mode toggle ----
+$('#mOne').onclick = () => setMode('one_way');
+$('#mTwo').onclick = () => setMode('two_way');
+function setMode(m) {
+  if (running) return;
+  mode = m;
+  document.body.dataset.mode = m;
+  $('#mOne').classList.toggle('on', m === 'one_way');
+  $('#mTwo').classList.toggle('on', m === 'two_way');
+}
+
+// ---- session ----
+function settings() {
+  const base = { token, speak: $('#speak').checked, voice: $('#voice').value, mode };
+  if (mode === 'one_way') base.target_language = $('#target').value;
+  else { base.language_a = $('#langA').value; base.language_b = $('#langB').value; }
+  return base;
+}
+
+async function start() {
+  $('#status').textContent = 'connecting';
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:false }
+  });
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/translate`);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => ws.send(JSON.stringify(settings()));
+
+  ws.onmessage = async e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'ready') {
+      ctx = new AudioContext();
+      await ctx.audioWorklet.addModule('/static/pcm-worklet.js');
+      node = new AudioWorkletNode(ctx, 'pcm-worklet');
+      ctx.createMediaStreamSource(stream).connect(node);
+      node.port.onmessage = ev => { if (ws.readyState === 1) ws.send(ev.data); };
+      running = true;
+      $('#toggle').textContent = 'Stop';
+      $('#toggle').classList.add('rec');
+      $('#status').textContent = 'listening'; $('#status').className = 'live';
+      lockControls(true);
+    } else if (m.type === 'source') {
+      appendText($('#srcStream'), srcHolder, m.text, m.final);
+    } else if (m.type === 'translation') {
+      appendText($('#tgtStream'), tgtHolder, m.text, m.final);
+    } else if (m.type === 'audio') {
+      playPCM(m.pcm, 24000);
+    } else if (m.type === 'audio_start') {
+      // could show a speaking indicator
+    } else if (m.type === 'utterance_end') {
+      srcHolder.el = null; tgtHolder.el = null;
+    } else if (m.type === 'error') {
+      $('#status').textContent = 'error: ' + m.message;
+      stop();
+    }
+  };
+
+  ws.onclose = ev => {
+    if (ev.code === 4401) { sessionStorage.clear(); location.href = '/login'; return; }
+    if (running) stop();
+  };
+  ws.onerror = () => { $('#status').textContent = 'connection failed'; stop(); };
+}
+
+function stop() {
+  running = false;
+  try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ eof: true })); } catch {}
+  if (node) node.disconnect();
+  if (ctx) ctx.close();
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  setTimeout(() => { if (ws && ws.readyState === 1) ws.close(); }, 300);
+  $('#toggle').textContent = 'Start';
+  $('#toggle').classList.remove('rec');
+  $('#status').textContent = 'stopped'; $('#status').className = '';
+  lockControls(false);
+}
+
+function lockControls(on) {
+  ['#target','#langA','#langB','#voice','#speak','#mOne','#mTwo'].forEach(s => $(s).disabled = on);
+}
+
+$('#toggle').onclick = () => {
+  if (running) return stop();
+  $('#toggle').disabled = true;
+  start().catch(err => { $('#status').textContent = 'mic error: ' + err.message; })
+         .finally(() => { $('#toggle').disabled = false; });
+};
+
+$('#out').onclick = () => { sessionStorage.clear(); location.href = '/login'; };
+
+loadOptions();
+</script>
+</body>
+</html>

@@ -20,8 +20,10 @@ from fastapi.staticfiles import StaticFiles
 import auth
 import config
 import db
+import languages
 import routes_api
 import transcribe
+import translate
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("server")
@@ -70,10 +72,25 @@ async def admin_page():
     return FileResponse(f"{config.STATIC_DIR}/admin.html")
 
 
+@app.get("/translate")
+async def translate_page():
+    return FileResponse(f"{config.STATIC_DIR}/translate.html")
+
+
+@app.get("/api/languages")
+async def language_list():
+    """Options for the translator dropdowns."""
+    return {
+        "languages": [{"code": c, "name": n} for c, n in languages.LANGUAGES],
+        "voices": ["Maya", "Adrian"],
+    }
+
+
 # ---------------------------------------------------------------- routers
 
 app.include_router(routes_api.router)
 app.include_router(transcribe.router)
+app.include_router(translate.router)
 
 # NOTE: the recordings directory is deliberately NOT mounted as static.
 # Serving it would let anyone with a filename bypass auth entirely.
