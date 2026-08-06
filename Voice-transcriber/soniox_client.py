@@ -89,14 +89,15 @@ TTS_SAMPLE_RATE = 24000  # Soniox TTS default for pcm_s16le
 
 
 def translate_stt_config(mode, target_language=None, language_a=None,
-                         language_b=None, sample_rate=16000):
+                         language_b=None, sample_rate=16000, diarize=False):
     """STT config with a translation block.
 
     mode 'one_way': detected speech -> target_language.
     mode 'two_way': bidirectional between language_a and language_b.
 
     Endpoint detection is on so each utterance closes promptly, which is what
-    lets the TTS side speak one sentence at a time.
+    lets the TTS side speak one sentence at a time. diarize adds per-token
+    speaker ids, used to label who said what in the captions.
     """
     cfg = {
         "api_key": get_api_key(),
@@ -107,6 +108,8 @@ def translate_stt_config(mode, target_language=None, language_a=None,
         "enable_language_identification": True,
         "enable_endpoint_detection": True,
     }
+    if diarize:
+        cfg["enable_speaker_diarization"] = True
     if mode == "one_way":
         cfg["translation"] = {
             "type": "one_way",

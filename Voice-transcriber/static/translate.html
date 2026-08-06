@@ -53,6 +53,8 @@
   .stream { border:1px solid var(--line); border-radius:10px; padding:16px;
     min-height:120px; background:var(--panel); font-size:16px; line-height:1.6; }
   .partial { color:var(--muted); }
+  .spk { display:block; font-size:11px; font-weight:600; letter-spacing:.3px;
+    color:var(--accent); margin-bottom:3px; }
   .utt { margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,.05); }
   .utt:last-child { border-bottom:0; margin-bottom:0; }
   .empty { color:var(--muted); text-align:center; padding:40px 0; font-size:14px; }
@@ -104,6 +106,9 @@
   </div>
 
   <label class="toggle"><input type="checkbox" id="speak" checked> Speak translation</label>
+  <label class="toggle" title="Best in two-way mode with clear turn-taking and separate mics">
+    <input type="checkbox" id="diarize"> Label speakers
+  </label>
 
   <div class="spacer"></div>
   <button id="restart" title="Clear the transcript and start a fresh session">Restart</button>
@@ -169,7 +174,7 @@ function clearEmpty(el) { const e = el.querySelector('.empty'); if (e) e.remove(
 const srcHolder = { el: null };
 const tgtHolder = { el: null };
 
-function setLive(streamEl, holder, text) {
+function setLive(streamEl, holder, text, speaker) {
   if (!text) return;
   clearEmpty(streamEl);
   if (!holder.el) {
@@ -177,7 +182,14 @@ function setLive(streamEl, holder, text) {
     holder.el.className = 'utt partial';
     streamEl.appendChild(holder.el);
   }
-  holder.el.textContent = text;
+  if (speaker) {
+    // Speaker label above the line, then the text.
+    holder.el.innerHTML =
+      `<span class="spk">${speaker}</span>` +
+      text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  } else {
+    holder.el.textContent = text;
+  }
   streamEl.scrollTop = streamEl.scrollHeight;
 }
 
@@ -223,7 +235,8 @@ function setMode(m) {
 
 // ---- session ----
 function settings() {
-  const base = { token, speak: $('#speak').checked, voice: $('#voice').value, mode };
+  const base = { token, speak: $('#speak').checked, voice: $('#voice').value,
+                 diarize: $('#diarize').checked, mode };
   if (mode === 'one_way') base.target_language = $('#target').value;
   else { base.language_a = $('#langA').value; base.language_b = $('#langB').value; }
   return base;
@@ -255,14 +268,17 @@ async function start() {
       $('#status').textContent = 'listening'; $('#status').className = 'live';
       lockControls(true);
     } else if (m.type === 'captions') {
-      setLive($('#srcStream'), srcHolder, m.source);
-      setLive($('#tgtStream'), tgtHolder, m.translation);
+      setLive($('#srcStream'), srcHolder, m.source, m.speaker);
+      setLive($('#tgtStream'), tgtHolder, m.translation, m.speaker);
     } else if (m.type === 'audio') {
       playPCM(m.pcm, 24000);
     } else if (m.type === 'audio_start') {
       // could show a speaking indicator
     } else if (m.type === 'utterance_end') {
       closeUtterance();
+    } else if (m.type === 'timeout') {
+      $('#status').textContent = m.message || 'Session ended after inactivity.';
+      stop();
     } else if (m.type === 'error') {
       $('#status').textContent = 'error: ' + m.message;
       stop();

@@ -63,15 +63,23 @@ async def translate(client: WebSocket):
     mode = hello.get("mode", "one_way")
     speak = bool(hello.get("speak", True))         # voice-out on/off
     voice = hello.get("voice", "Maya")
+    diarize = bool(hello.get("diarize", False))    # label who said what
 
     if mode == "one_way":
         target = hello.get("target_language", "es")
         if not languages.is_valid(target):
             await _fail(client, "Unsupported target language")
             return
-        stt_cfg = sx.translate_stt_config("one_way", target_language=target)
+        stt_cfg = sx.translate_stt_config(
+            "one_way", target_language=target, diarize=diarize
+        )
         # In one-way, everything is spoken in the single target language.
         tts_lang_for = lambda tok_lang: target
+        # Any spoken word already in the target language (e.g. an English word
+        # dropped into Spanish, target=English) has nothing to translate, so
+        # Soniox emits it as source-only. We still want it in the translation
+        # output, so we treat source tokens in these languages as pass-through.
+        target_langs = {target}
     elif mode == "two_way":
         lang_a = hello.get("language_a", "en")
         lang_b = hello.get("language_b", "es")
@@ -79,11 +87,13 @@ async def translate(client: WebSocket):
             await _fail(client, "Unsupported language pair")
             return
         stt_cfg = sx.translate_stt_config(
-            "two_way", language_a=lang_a, language_b=lang_b
+            "two_way", language_a=lang_a, language_b=lang_b, diarize=diarize
         )
         # In two-way, a translated token's own language field tells us which
         # voice language to speak it in.
         tts_lang_for = lambda tok_lang: tok_lang or lang_b
+        # Both sides are targets; a word already in either is passed through.
+        target_langs = {lang_a, lang_b}
     else:
         await _fail(client, "Unknown mode")
         return
@@ -114,6 +124,7 @@ async def translate(client: WebSocket):
                         msg = await client.receive()
                         if "bytes" in msg and msg["bytes"] is not None:
                             await stt.send(msg["bytes"])
+                            last_audio_sent["t"] = loop.time()
                         elif "text" in msg and msg["text"]:
                             # A control frame, e.g. {"eof": true} on Stop.
                             ctrl = json.loads(msg["text"])
@@ -137,6 +148,14 @@ async def translate(client: WebSocket):
             IDLE_CLOSE = 1.2
             loop = asyncio.get_event_loop()
 
+            # Stay live through pauses, but end the session after a long silence.
+            # last_speech_at tracks when real speech was last recognized (not
+            # mere audio frames - the mic streams quiet audio continuously).
+            SILENCE_TIMEOUT = 20 * 60      # 20 minutes with no speech -> stop
+            KEEPALIVE_EVERY = 10           # seconds; Soniox drops idle >20s
+            last_speech_at = {"t": loop.time()}
+            last_audio_sent = {"t": loop.time()}
+
             async def speak_utterance():
                 text = pending_speech["text"].strip()
                 lang = pending_speech["lang"]
@@ -158,6 +177,16 @@ async def translate(client: WebSocket):
             # and just displays it - no client-side concatenation.
             src_final = {"text": ""}
             tgt_final = {"text": ""}
+            # Speaker votes for the current utterance (diarization). Majority
+            # wins, so a stray mislabel on one token doesn't flip the label -
+            # same approach the transcription engine uses.
+            spk_votes = {}
+
+            def current_speaker():
+                if not spk_votes:
+                    return None
+                sid = max(spk_votes, key=spk_votes.get)
+                return f"user-{sid}"
 
             async def pump_stt():
                 async for raw in stt:
@@ -202,12 +231,32 @@ async def translate(client: WebSocket):
                             else:
                                 tgt_partial += text
                         else:
+                            # Source side. But if the spoken word is already in
+                            # a target language, there's nothing to translate -
+                            # carry it into the translation output too, so mixed
+                            # speech ("Vamos a un meeting") comes out complete.
+                            already_target = lang in target_langs
                             if is_final:
                                 src_final["text"] += text
+                                if already_target:
+                                    tgt_final["text"] += text
+                                    pending_speech["text"] += text
+                                    if lang:
+                                        pending_speech["lang"] = lang
                             else:
                                 src_partial += text
+                                if already_target:
+                                    tgt_partial += text
 
                         last_token_at["t"] = loop.time()
+                        last_speech_at["t"] = loop.time()
+
+                        # Diarization: count this token's speaker toward the
+                        # current utterance's label.
+                        if diarize:
+                            sid = tok.get("speaker")
+                            if sid is not None:
+                                spk_votes[sid] = spk_votes.get(sid, 0) + 1
 
                     # Send the complete current text for each side. The browser
                     # replaces its box contents with this - no accumulation.
@@ -215,13 +264,18 @@ async def translate(client: WebSocket):
                         "type": "captions",
                         "source": (src_final["text"] + src_partial).strip(),
                         "translation": (tgt_final["text"] + tgt_partial).strip(),
+                        "speaker": current_speaker() if diarize else None,
                     })
 
                     if endpoint:
                         await speak_utterance()
-                        await to_browser({"type": "utterance_end"})
+                        await to_browser({
+                            "type": "utterance_end",
+                            "speaker": current_speaker() if diarize else None,
+                        })
                         src_final["text"] = ""
                         tgt_final["text"] = ""
+                        spk_votes.clear()
 
                 # Stream closed: speak anything still buffered.
                 await speak_utterance()
@@ -238,13 +292,44 @@ async def translate(client: WebSocket):
                         await speak_utterance()
                         await to_browser({"type": "utterance_end"})
 
+            async def keepalive_and_silence():
+                # Two jobs on one clock:
+                #  - keepalive: if no audio has been forwarded recently, ping
+                #    Soniox so it doesn't drop the session at its 20s idle limit.
+                #  - silence timeout: if no speech has been recognized for
+                #    SILENCE_TIMEOUT, end the session (stays live through short
+                #    and moderate pauses, stops only after a long true silence).
+                while alive:
+                    await asyncio.sleep(1.0)
+                    now = loop.time()
+                    if now - last_audio_sent["t"] > KEEPALIVE_EVERY:
+                        try:
+                            await stt.send(json.dumps({"type": "keepalive"}))
+                            last_audio_sent["t"] = now
+                        except Exception:
+                            break
+                    if now - last_speech_at["t"] > SILENCE_TIMEOUT:
+                        log.info("silence timeout (%ds) - ending session",
+                                 SILENCE_TIMEOUT)
+                        await to_browser({
+                            "type": "timeout",
+                            "message": "Session ended after inactivity.",
+                        })
+                        try:
+                            await stt.send(b"")   # close upstream gracefully
+                        except Exception:
+                            pass
+                        break
+
             watchdog_task = asyncio.create_task(idle_watchdog())
+            keepalive_task = asyncio.create_task(keepalive_and_silence())
             try:
                 await asyncio.gather(pump_mic(), pump_stt())
             except ConnectionClosedOK:
                 pass
             finally:
                 watchdog_task.cancel()
+                keepalive_task.cancel()
 
     except WebSocketDisconnect:
         log.info("translate client disconnected")
