@@ -1,9 +1,16 @@
-import sys, os, tempfile
+import sys, os, tempfile, wave
 sys.path.insert(0, os.getcwd())
 import soniox_client as sx
-p = os.path.join(tempfile.gettempdir(),'ci_transcribe_local.wav')
-with open(p,'wb') as f:
-    f.write(b'RIFF....WAVEfmt ')
+
+# Create a small valid WAV (1s silence, 16kHz mono, 16-bit) so Soniox accepts it.
+p = os.path.join(tempfile.gettempdir(), 'ci_transcribe_local.wav')
+with wave.open(p, 'wb') as wf:
+    wf.setnchannels(1)
+    wf.setsampwidth(2)  # 16-bit
+    wf.setframerate(16000)
+    silence = (b'\x00\x00') * 16000  # 1 second of silence
+    wf.writeframes(silence)
+
 print('calling transcribe_file on', p)
 try:
     turns = sx.transcribe_file(p, poll_interval=1, timeout=30)

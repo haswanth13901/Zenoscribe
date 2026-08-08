@@ -28,12 +28,13 @@ from websockets.exceptions import ConnectionClosedOK
 import auth
 import languages
 import soniox_client as sx
+import config
 
 log = logging.getLogger("translate")
 
-# Flip to True to log every token Soniox returns (status/lang/final/text).
-# Use it to confirm whether translation tokens are actually arriving.
-DEBUG_TOKENS = True
+# Controlled by config.DEBUG_TOKENS (default False). Avoid logging token text
+# in production since it may contain user speech/transcript content.
+DEBUG_TOKENS = getattr(config, 'DEBUG_TOKENS', False)
 
 router = APIRouter()
 
@@ -210,8 +211,19 @@ async def translate(client: WebSocket):
                         lang = tok.get("language")
 
                         if DEBUG_TOKENS and text:
-                            log.info("TOK status=%s lang=%s final=%s %r",
+                            # Only log full text when explicit debug mode is enabled.
+                            log.info("TOK status=%s lang=%s final=%s text=%r",
                                      status, lang, tok.get("is_final"), text)
+                        else:
+                            # Non-debug mode: log a redacted placeholder/length to
+                            # aid diagnostics without exposing user content.
+                            if text:
+                                try:
+                                    length = len(text)
+                                except Exception:
+                                    length = None
+                                log.debug("TOK status=%s lang=%s final=%s text_len=%s",
+                                          status, lang, tok.get("is_final"), length)
 
                         if text in ("<end>", "<fin>") or tok.get("is_end") \
                                 or tok.get("is_endpoint"):
