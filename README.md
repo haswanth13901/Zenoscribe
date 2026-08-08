@@ -51,10 +51,10 @@ pip install -r requirements.txt
 Copy the example file and populate values. Do not commit real secrets to git.
 
 ```bash
-cp Voice-transcriber/.env.example Voice-transcriber/.env
+cp voice_transcriber/.env.example voice_transcriber/.env
 ```
 
-Edit `Voice-transcriber/.env` and set at minimum:
+Edit `voice_transcriber/.env` and set at minimum:
 
 ```
 # Soniox API key (required for transcription)
@@ -121,8 +121,8 @@ localhost unless `RESTRICT_TEST_HOOK_TO_LOCALHOST=false`.
 3) Start the app (development)
 
 ```bash
-# from repository root
-uvicorn Voice-transcriber.server:app --reload --port 8000
+# from the repository root
+uvicorn voice_transcriber.server:app --reload --port 8000
 ```
 
 Open http://localhost:8000 and sign in. The first-run admin user will be
@@ -144,7 +144,8 @@ Start (example):
 
 ```bash
 # ensure the environment variables are provided by your system/CI/deployment
-uvicorn Voice-transcriber.server:app --host 0.0.0.0 --port 8000 --workers 1
+# from the repository root
+uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
 CI / E2E tests
@@ -189,7 +190,7 @@ powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
 ```bash
 # POSIX
 source .venv/bin/activate
-python -m uvicorn Voice-transcriber.server:app --port 8000
+python -m uvicorn voice_transcriber.server:app --port 8000
 # then open http://localhost:8000
 ```
 
@@ -197,7 +198,7 @@ python -m uvicorn Voice-transcriber.server:app --port 8000
 
 ```bash
 # Run pytest and the focused E2E test
-pytest -q Voice-transcriber/tests/test_e2e_playwright_upload.py
+pytest -q voice_transcriber/tests/test_e2e_playwright_upload.py
 ```
 
 4) Run with Docker (local parity with CI):
