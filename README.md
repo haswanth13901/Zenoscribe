@@ -135,7 +135,12 @@ For production, enforce the following before starting the app:
 
 - Set `ENV=production`.
 - Set a strong `JWT_SECRET` (store it in your secret manager, not in git).
+  Keep it stable across deploys — do not rotate it on a schedule, or every
+  deploy will log all users out. (`DEV_ROTATE_JWT_ON_RESTART` is a dev-only
+  convenience and is ignored when `ENV=production`.)
 - Set `ADMIN_PASSWORD` to a secure password meeting the minimum length.
+- Optionally tune `TOKEN_HOURS` (default 8) for how long a login lasts before
+  it expires and the user must sign in again.
 
 If required secrets are missing or weak in production the app will refuse to
 start to avoid insecure defaults.
@@ -285,8 +290,29 @@ Neither is committed to git (see `.gitignore`).
   socket opens, so the JWT is not exposed in the URL/query string where it
   could appear in server or proxy logs.
   over plain HTTP. **Put this behind HTTPS before deploying beyond localhost.**
-- Tokens live in `sessionStorage`, so closing the tab logs out. Switch to
-  `localStorage` if you want sessions to persist.
+
+### Sessions & tokens
+
+- Login issues a JWT stored in the browser's `sessionStorage`, so closing the
+  tab clears the session.
+- Every protected page (`/app`, `/admin`, `/translate`) validates its stored
+  token against the server (`/api/me`) on load and stays hidden until the token
+  is confirmed. A stale or expired token bounces the user straight to `/login`
+  instead of briefly showing signed-in content.
+- Tokens expire after `TOKEN_HOURS` (default 8). Expiry is baked into each
+  token, so a continuously running server does not keep anyone logged in past
+  their window — the next request after expiry returns 401 and the page
+  redirects to login. There is no automatic refresh; the user logs in again to
+  get a fresh token.
+- `JWT_SECRET` is a stable signing key, not something to rotate on a schedule.
+  Set it once. Changing it invalidates every existing token at once — useful as
+  a "log everyone out now" switch after a suspected leak, but not for routine
+  operation.
+- **Forcing re-login on a dev restart:** set `DEV_ROTATE_JWT_ON_RESTART=true` in
+  a development `.env`. The secret is then regenerated on every startup, so
+  restarting the dev server invalidates all tokens and sends every open page
+  back to login. This flag is ignored in production, where the fixed
+  `JWT_SECRET` is always used so deploys/restarts don't log real users out.
 
 ## Batch (non-live) transcription
 
