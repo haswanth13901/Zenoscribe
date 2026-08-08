@@ -4,9 +4,14 @@ Kept separate so the auth layer and the transcription engine can both read
 paths without importing each other.
 """
 
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
+
+# Environment mode: 'development' (default), 'testing', or 'production'
+ENV = os.environ.get('ENV', 'development').lower()
+PRODUCTION = ENV == 'production'
 RECORDINGS = BASE_DIR / "recordings"
 RECORDINGS.mkdir(exist_ok=True)
 
@@ -52,3 +57,15 @@ DEBUG_SONIOX = False
 # Log the raw speaker ID on each finalized token, to check whether Soniox is
 # separating speakers at all.
 DEBUG_SPEAKERS = False
+# When true, translate.py will log token text in debug messages. Default
+# is False; do not enable in production.
+DEBUG_TOKENS = os.environ.get('DEBUG_TOKENS', 'false').lower() in ('1','true','yes')
+
+# ------------------------------------------------------- test hooks (safe-by-default)
+# Allow tests to enable runtime-only admin endpoints that flip fake upstream
+# behavior. This must be explicitly enabled in CI/dev; default is disabled.
+ALLOW_TEST_HOOKS = os.environ.get('ALLOW_TEST_HOOKS', 'false').lower() in ('1','true','yes')
+# Short shared secret required to call test hooks. Set in CI env when enabled.
+TEST_HOOK_SECRET = os.environ.get('TEST_HOOK_SECRET')
+# When true, only accept test-hook requests coming from localhost addresses.
+RESTRICT_TEST_HOOK_TO_LOCALHOST = os.environ.get('RESTRICT_TEST_HOOK_TO_LOCALHOST', 'true').lower() in ('1','true','yes')

@@ -128,21 +128,42 @@ def count_recent_failed_logins(username: str, ip: str, window_sec: int):
 
 def create_user(username, password_hash, full_name="", email="",
                 role="user", created_by=None):
-    uid = uuid.uuid4().hex
+    """Create a new user or update an existing one with the provided values.
+
+    This makes test setup idempotent: if a user with the same username exists
+    the record is updated with the supplied password and profile fields and
+    the existing id is returned instead of failing on UNIQUE constraint.
+    """
+    uname = username.strip()
     conn = connect()
     try:
+        existing = conn.execute(
+            "SELECT id FROM users WHERE username = ?", (uname,)
+        ).fetchone()
+        if existing:
+            uid = existing["id"]
+            conn.execute(
+                """UPDATE users
+                   SET password_hash = ?, full_name = ?, email = ?, role = ?, is_active = 1, created_by = ?
+                   WHERE id = ?""",
+                (password_hash, full_name.strip(), email.strip(), role, created_by, uid),
+            )
+            conn.commit()
+            return uid
+        # otherwise insert new
+        uid = uuid.uuid4().hex
         conn.execute(
             """INSERT INTO users
                (id, username, full_name, email, password_hash, role,
                 is_active, created_at, created_by)
                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
-            (uid, username.strip(), full_name.strip(), email.strip(),
+            (uid, uname, full_name.strip(), email.strip(),
              password_hash, role, _now(), created_by),
         )
         conn.commit()
+        return uid
     finally:
         conn.close()
-    return uid
 
 
 def get_user_by_username(username) -> Optional[sqlite3.Row]:
@@ -302,16 +323,30 @@ def count_admins():
 
 def add_recording(rec_id, user_id, wav_file, txt_file, started_at,
                   duration, turn_count, preview):
+    """Insert or update a recording entry. If a recording with the same id
+    already exists, update it so test setup is idempotent.
+    """
     conn = connect()
     try:
-        conn.execute(
-            """INSERT INTO recordings
-               (id, user_id, wav_file, txt_file, started_at,
-                duration, turn_count, preview)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (rec_id, user_id, wav_file, txt_file, started_at,
-             duration, turn_count, preview),
-        )
+        existing = conn.execute(
+            "SELECT id FROM recordings WHERE id = ?", (rec_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """UPDATE recordings
+                   SET user_id = ?, wav_file = ?, txt_file = ?, started_at = ?, duration = ?, turn_count = ?, preview = ?
+                   WHERE id = ?""",
+                (user_id, wav_file, txt_file, started_at, duration, turn_count, preview, rec_id),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO recordings
+                   (id, user_id, wav_file, txt_file, started_at,
+                    duration, turn_count, preview)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (rec_id, user_id, wav_file, txt_file, started_at,
+                 duration, turn_count, preview),
+            )
         conn.commit()
     finally:
         conn.close()

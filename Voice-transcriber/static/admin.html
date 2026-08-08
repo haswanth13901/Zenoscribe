@@ -163,8 +163,9 @@ async function api(path, opts = {}) {
   return data;
 }
 
-const esc = s => String(s ?? '').replace(/[&<>"]/g,
+const esc = s => String(s ?? '').replace(/[&<>\"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const jsEsc = s => String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n').replace(/\r/g,'\\r');
 
 const fmtDate = iso => {
   if (!iso) return '—';
@@ -215,10 +216,10 @@ async function loadUsers() {
       <td>${presence(u.last_seen)}</td>
       <td class="muted" style="font-size:13px">${fmtDate(u.last_login)}</td>
       <td><div class="row-actions">
-        <button onclick="resetPw('${u.id}','${esc(u.username)}')">Reset password</button>
-        <button onclick="toggle('${u.id}',${u.is_active ? 'false' : 'true'})">
+        <button onclick="resetPw('${jsEsc(u.id)}','${jsEsc(u.username)}')">Reset password</button>
+        <button onclick="toggle('${jsEsc(u.id)}',${u.is_active ? 'false' : 'true'})">
           ${u.is_active ? 'Deactivate' : 'Activate'}</button>
-        <button class="danger" onclick="delUser('${u.id}','${esc(u.username)}',${u.recording_count})">Delete</button>
+        <button class="danger" onclick="delUser('${jsEsc(u.id)}','${jsEsc(u.username)}',${u.recording_count})">Delete</button>
       </div></td>
     </tr>`).join('');
 
@@ -298,9 +299,9 @@ async function loadRecs() {
       <td>${r.turn_count}</td>
       <td class="preview">${esc(r.preview) || '—'}</td>
       <td><div class="row-actions">
-        <button onclick="dl('${r.id}','txt')">Transcript</button>
-        <button onclick="dl('${r.id}','wav')">Audio</button>
-        <button class="danger" onclick="delRec('${r.id}')">Delete</button>
+        <button onclick="dl('${jsEsc(r.id)}','txt')">Transcript</button>
+        <button onclick="dl('${jsEsc(r.id)}','wav')">Audio</button>
+        <button class="danger" onclick="delRec('${jsEsc(r.id)}')">Delete</button>
       </div></td>
     </tr>`).join('');
 }

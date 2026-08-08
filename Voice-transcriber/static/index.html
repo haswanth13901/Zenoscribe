@@ -93,10 +93,31 @@
   <button id="out">Sign out</button>
   <button id="clear">Clear</button>
   <button id="save">Save</button>
+  <button id="uploadBtn">Upload</button>
+  <input id="uploadInput" type="file" accept="audio/*" style="display:none">
   <button id="toggle">Start</button>
 </header>
 
 <main><div id="transcript"><div class="empty">Press Start and speak.</div></div></main>
+
+<!-- Upload panel for file-based transcription/translation -->
+<div id="uploadPanel" style="max-width:780px;margin:14px auto;display:none;padding:12px;">
+  <div class="rec">
+    <div class="meta" id="uploadFilename"></div>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div style="min-width:180px">
+        <label style="display:block;font-size:11px;color:var(--muted);">Translate (target language)</label>
+        <select id="uploadLang" style="min-width:160px;padding:6px;border-radius:6px;background:var(--panel);color:var(--text);border:1px solid var(--line)"></select>
+      </div>
+      <div>
+        <button id="doTranscribe">Transcribe</button>
+        <button id="doTranscribeTranslate">Transcribe & Translate</button>
+      </div>
+    </div>
+    <div id="uploadResult" class="prev" style="margin-top:10px;color:var(--text);"></div>
+    <div id="uploadTranslateResult" class="prev" style="margin-top:10px;color:var(--text);"></div>
+  </div>
+</div>
 
 <aside id="drawer" hidden>
   <div class="dhead">
@@ -321,6 +342,76 @@ function saveBlob(blob, name) {
   a.href = url; a.download = name; a.click();
   URL.revokeObjectURL(url);
 }
+
+// ---- Upload UI handlers ----
+(function initUploadUI(){
+  const uploadBtn = $('#uploadBtn');
+  const uploadInput = $('#uploadInput');
+  const panel = $('#uploadPanel');
+  const filenameEl = $('#uploadFilename');
+  const langSel = $('#uploadLang');
+  const doTranscribe = $('#doTranscribe');
+  const doTranscribeTranslate = $('#doTranscribeTranslate');
+  const resultEl = $('#uploadResult');
+  const translateEl = $('#uploadTranslateResult');
+
+  async function loadLanguages() {
+    try {
+      const data = await api('/api/languages');
+      const opts = data.languages.map(l => `<option value="${l.code}">${l.name}</option>`).join('');
+      langSel.innerHTML = opts;
+      langSel.value = 'en';
+    } catch (e) {
+      langSel.innerHTML = '<option value="en">English</option>';
+    }
+  }
+
+  uploadBtn.onclick = () => uploadInput.click();
+  uploadInput.onchange = async (ev) => {
+    const f = uploadInput.files && uploadInput.files[0];
+    if (!f) return;
+    filenameEl.textContent = `Selected: ${f.name} (${Math.round(f.size/1024)} KB)`;
+    panel.style.display = 'block';
+    resultEl.textContent = '';
+    translateEl.textContent = '';
+    await loadLanguages();
+  };
+
+  async function doUpload(targetLanguage) {
+    const f = uploadInput.files && uploadInput.files[0];
+    if (!f) { alert('Choose a file first'); return; }
+    const fd = new FormData();
+    fd.append('file', f, f.name);
+    const qs = targetLanguage ? ('?target_language=' + encodeURIComponent(targetLanguage)) : '';
+    try {
+      const r = await fetch('/api/transcribe/translate' + qs, { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+      if (!r.ok) {
+        const txt = await r.text();
+        alert('Upload failed: ' + r.status + ' ' + txt);
+        return null;
+      }
+      return await r.json();
+    } catch (e) { alert('Upload error: ' + e.message); return null; }
+  }
+
+  doTranscribe.onclick = async () => {
+    resultEl.textContent = 'Transcribing...';
+    translateEl.textContent = '';
+    const json = await doUpload(null);
+    if (!json) { resultEl.textContent = ''; return; }
+    const text = (json.turns || []).map(t => t.text || '').join(' ').trim();
+    resultEl.textContent = text || '(no transcription)';
+  };
+
+  doTranscribeTranslate.onclick = async () => {
+    const tgt = langSel.value;
+    translateEl.textContent = 'Transcribing & translating...';
+    const json = await doUpload(tgt);
+    if (!json) { translateEl.textContent = ''; return; }
+    const text = (json.turns || []).map(t => t.text || '').join(' ').trim();
+    translateEl.textContent = text || '(no translation)';
+  };
+})();
 
 async function dl(id, kind) {
   try {

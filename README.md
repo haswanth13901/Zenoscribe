@@ -28,54 +28,148 @@ per user; an admin can see and manage everything.
 - A Soniox API key (https://soniox.com)
 - A modern browser (Chrome/Edge/Firefox) for mic capture
 
-## Setup
+## Quickstart (Development)
+
+These instructions get a developer environment up and running from a fresh
+clone. For production deployments see the "Production" section below.
+
+Prerequisites
+
+- Python 3.10 or later
+- Git
+- A modern browser (Chrome/Edge/Firefox)
+
+1) Install dependencies
 
 ```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Create a `.env` from the template:
+2) Create an environment file
+
+Copy the example file and populate values. Do not commit real secrets to git.
 
 ```bash
-cp .env.example .env
+cp Voice-transcriber/.env.example Voice-transcriber/.env
 ```
 
-Fill it in:
+Edit `Voice-transcriber/.env` and set at minimum:
 
 ```
-SONIOX_API_KEY=your_soniox_key
-JWT_SECRET=<generate below>
+# Soniox API key (required for transcription)
+SONIOX_API_KEY=
+
+# JWT signing secret. Required in production; a generated secret is allowed
+# in development/testing but should not be used in deployed environments.
+JWT_SECRET=
+
+# Initial admin account (set a strong password in production)
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=choose_a_strong_password  # must be at least 8 characters
+ADMIN_PASSWORD=
+
+# Environment mode: development | testing | production
+ENV=development
+
+# Optional test hooks (enable only in CI/dev)
+ALLOW_TEST_HOOKS=false
+TEST_HOOK_SECRET=
+RESTRICT_TEST_HOOK_TO_LOCALHOST=true
 ```
 
-Generate a JWT secret:
+3) Start the app (development)
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+# from repository root
+uvicorn Voice-transcriber.server:app --reload --port 8000
 ```
 
-> No spaces around the `=` in `.env`. `KEY=value`, not `KEY = value` — a
-> leading space becomes part of the value.
+Open http://localhost:8000 and sign in. The first-run admin user will be
+created automatically if no admin exists; in development a generated password may
+be used (the app will warn but will not print generated secrets in logs).
 
-## Run
+Production
+
+For production, enforce the following before starting the app:
+
+- Set `ENV=production`.
+- Set a strong `JWT_SECRET` (store it in your secret manager, not in git).
+- Set `ADMIN_PASSWORD` to a secure password meeting the minimum length.
+
+If required secrets are missing or weak in production the app will refuse to
+start to avoid insecure defaults.
+
+Start (example):
 
 ```bash
-uvicorn server:app --reload --port 8000
+# ensure the environment variables are provided by your system/CI/deployment
+uvicorn Voice-transcriber.server:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-Open http://localhost:8000. On first start, the admin account is created from
-`ADMIN_USERNAME` / `ADMIN_PASSWORD` (watch the log to confirm). If
-`ADMIN_PASSWORD` is blank or shorter than 8 characters, a strong random password
-is generated and printed to the terminal.
+CI / E2E tests
 
-- `/` or `/login` — sign in
-- `/app` — recorder (all users)
-- `/admin` — admin console (admins only)
+- The repository includes an opinionated GitHub Actions workflow that runs the
+  Playwright E2E test (`.github/workflows/playwright-e2e.yml`). The workflow
+  expects `TEST_HOOK_SECRET` to be provided via repository secrets and enables
+  test hooks during the job.
 
-Mic access requires a secure context. `localhost` counts; any other host needs
-HTTPS.
+Troubleshooting
 
+- If the app fails on startup with a missing-secret error, verify `ENV` and the
+  related env vars (`JWT_SECRET`, `ADMIN_PASSWORD`) are set for production.
+- Mic capture requires a secure context (HTTPS) except for `localhost` where
+  browsers allow getUserMedia over HTTP for development.
+
+Security notes
+
+- Do not enable debug logging that prints transcript or token content in
+  production (`DEBUG_TOKENS` is disabled by default).
+- Do not commit `.env` or any secret material to the repository.
+
+For full developer reference see the Project structure section below.
+
+
+## Developer quickchecks
+
+These commands help verify a fresh developer environment is correctly configured.
+
+1) Bootstrap (create venv, install deps, Playwright browsers):
+
+```bash
+# POSIX
+bash scripts/bootstrap.sh
+
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
+```
+
+2) Activate the virtualenv and run a quick smoke check:
+
+```bash
+# POSIX
+source .venv/bin/activate
+python -m uvicorn Voice-transcriber.server:app --port 8000
+# then open http://localhost:8000
+```
+
+3) Run unit/E2E tests (Playwright must be installed):
+
+```bash
+# Run pytest and the focused E2E test
+pytest -q Voice-transcriber/tests/test_e2e_playwright_upload.py
+```
+
+4) Run with Docker (local parity with CI):
+
+```bash
+# Build and run
+docker-compose up --build
+# Visit http://localhost:8000
+```
+
+These quickchecks are intended for development and CI; do not enable debug
+logging or test hooks in production. See the Production section above for
+secure deployment requirements.
 ## Project structure
 
 ```
