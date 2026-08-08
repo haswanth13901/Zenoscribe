@@ -68,6 +68,7 @@
   <span class="spacer"></span>
   <span class="who" id="who"></span>
   <button onclick="location.href='/app'">Recorder</button>
+  <button id="uploadBtn">Upload</button>
   <button id="out">Sign out</button>
 </header>
 
@@ -144,9 +145,18 @@ const $ = s => document.querySelector(s);
 const token = sessionStorage.getItem('token');
 const me = JSON.parse(sessionStorage.getItem('user') || 'null');
 
-if (!token || !me) location.href = '/login';
-if (me && me.role !== 'admin') location.href = '/app';
-$('#who').textContent = me ? `${me.username} (admin)` : '';
+// Auth gate. Use replace() so the guarded page isn't left in history (which
+// can otherwise produce a back-button redirect loop), and stop() to halt the
+// rest of the script the moment we decide to leave.
+if (!token || !me) {
+  location.replace('/login');
+  throw new Error('redirecting to login');
+}
+if (me.role !== 'admin') {
+  location.replace('/app');
+  throw new Error('redirecting to app');
+}
+$('#who').textContent = `${me.username} (admin)`;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {
@@ -374,5 +384,6 @@ $('#out').onclick = () => { sessionStorage.clear(); location.href = '/login'; };
 
 loadUsers();
 </script>
+<script src="/static/upload.js"></script>
 </body>
 </html>

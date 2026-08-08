@@ -11,8 +11,12 @@ from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-import db
-import config
+try:
+    from . import db
+    from . import config
+except ImportError:  # run flat from inside the package dir
+    import db
+    import config
 
 load_dotenv()
 log = logging.getLogger("auth")
@@ -32,7 +36,7 @@ else:
     log.warning("No JWT_SECRET set; using a generated secret for development/testing only")
 
 JWT_ALGO = "HS256"
-TOKEN_HOURS = int(os.environ.get("TOKEN_HOURS", "12"))
+TOKEN_HOURS = int(os.environ.get("TOKEN_HOURS", "8"))
 
 bearer = HTTPBearer(auto_error=False)
 
