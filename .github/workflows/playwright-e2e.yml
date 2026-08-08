@@ -1,0 +1,44 @@
+name: Playwright E2E Upload
+
+on:
+  push:
+    paths:
+      - 'Voice-transcriber/**'
+  pull_request:
+    paths:
+      - 'Voice-transcriber/**'
+
+jobs:
+  e2e-playwright:
+    runs-on: ubuntu-latest
+    env:
+      ALLOW_TEST_HOOKS: 'true'
+      # Set TEST_HOOK_SECRET via repository/organization secrets for safety
+      TEST_HOOK_SECRET: ${{ secrets.TEST_HOOK_SECRET }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          # Install pinned requirements if present, then ensure Playwright + pytest are available
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install --upgrade pip
+          pip install pytest playwright pytest-playwright requests
+
+      - name: Install Playwright browsers
+        run: |
+          # Install browser binaries required by Playwright
+          python -m playwright install --with-deps
+
+      - name: Run Playwright E2E test
+        run: |
+          # Run only the E2E test file to keep job focused
+          python -m pytest Voice-transcriber/tests/test_e2e_playwright_upload.py -q
+        timeout-minutes: 20
