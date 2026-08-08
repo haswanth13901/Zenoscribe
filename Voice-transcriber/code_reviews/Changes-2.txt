@@ -1,0 +1,171 @@
+Below are implementation-ready test cases you can work through. I’ve grouped them by priority and written them so they can be turned into pytest, Playwright, or manual QA checks.
+
+1. Critical — Stored XSS in admin user list
+- ID: TC-01
+- Title: Admin UI escapes user-controlled values
+- Preconditions:
+  - Create a user with a malicious username, full name, and email such as:
+    - username: `<img src=x onerror="alert('xss')">`
+    - full name: `"><script>...</script>`
+- Steps:
+  1. Log in as admin.
+  2. Create the malicious user through the admin API or UI.
+  3. Open the admin console users tab.
+- Expected result:
+  - The malicious content is rendered as plain text.
+  - No alert, script execution, or DOM injection occurs.
+  - The page remains usable.
+- Target file: [Voice-transcriber/static/admin.html](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/static/admin.html>)
+
+2. Critical — Admin self-protection rules
+- ID: TC-02
+- Title: Admin cannot deactivate or delete themselves
+- Preconditions:
+  - Have at least one admin account.
+- Steps:
+  1. Log in as admin A.
+  2. Attempt to deactivate admin A via `/api/admin/users/{id}/active`.
+  3. Attempt to delete admin A via `/api/admin/users/{id}`.
+- Expected result:
+  - Both requests return 400 with a clear error message.
+  - The account remains active.
+- Target files: [Voice-transcriber/routes_api.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/routes_api.py>) and [Voice-transcriber/db.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/db.py>)
+
+3. Critical — Last-admin protection
+- ID: TC-03
+- Title: Prevent deleting or deactivating the last remaining admin
+- Preconditions:
+  - Have exactly one active admin account.
+- Steps:
+  1. Attempt to deactivate that admin.
+  2. Attempt to delete that admin.
+- Expected result:
+  - Both actions are blocked with 400 responses.
+  - The system still has one active admin.
+- Target files: [Voice-transcriber/routes_api.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/routes_api.py>) and [Voice-transcriber/db.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/db.py>)
+
+4. High — Unauthorized recording access
+- ID: TC-04
+- Title: Non-admin cannot access another user’s recording
+- Preconditions:
+  - Create two users and one recording for user A.
+- Steps:
+  1. Log in as user B.
+  2. Request transcript and audio for user A’s recording ID.
+- Expected result:
+  - The API returns 404 (not 200 or 403).
+  - No recording data is exposed.
+- Target file: [Voice-transcriber/routes_api.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/routes_api.py>)
+
+5. High — Deactivated users cannot authenticate
+- ID: TC-05
+- Title: Deactivated account immediately loses access
+- Preconditions:
+  - Create a user account and obtain a valid token.
+- Steps:
+  1. Log in as the user and use the token successfully.
+  2. Deactivate the user as admin.
+  3. Make another protected API request with the same token.
+- Expected result:
+  - The request fails with 401/403.
+  - The token is rejected immediately.
+- Target files: [Voice-transcriber/auth.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/auth.py>) and [Voice-transcriber/routes_api.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/routes_api.py>)
+
+6. High — Brute-force login throttling
+- ID: TC-06
+- Title: Login endpoint throttles repeated failures
+- Preconditions:
+  - Use an existing username with a wrong password.
+- Steps:
+  1. Submit 6+ failed login attempts for the same username/IP.
+  2. Try one more login with the same credentials.
+- Expected result:
+  - The 6th+ attempt returns 429 Too Many Requests.
+  - The account is temporarily blocked from further login attempts.
+- Target file: [Voice-transcriber/routes_api.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/routes_api.py>)
+
+7. High — Transcription request timeout/failure handling
+- ID: TC-07
+- Title: `/api/transcribe` fails fast when Soniox is slow or unavailable
+- Preconditions:
+  - Simulate a delayed or failing Soniox endpoint (e.g. mock the HTTP layer to sleep or return error).
+- Steps:
+  1. Upload a valid audio file to `/api/transcribe`.
+  2. Make the upstream response slow or unavailable.
+- Expected result:
+  - The request completes with a clear error response within a bounded time.
+  - The app does not hang indefinitely.
+  - The server remains responsive for other requests.
+- Target file: [Voice-transcriber/soniox_client.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/soniox_client.py>)
+
+8. High — Upload size enforcement
+- ID: TC-08
+- Title: Oversized uploads are rejected before processing
+- Preconditions:
+  - Have a file larger than the configured maximum upload size.
+- Steps:
+  1. Upload a file larger than `MAX_UPLOAD_SIZE`.
+  2. Verify the request body and server behavior.
+- Expected result:
+  - The API returns 413 Request Entity Too Large.
+  - No temp file is left behind.
+  - No transcription job is started.
+- Target file: [Voice-transcriber/routes_api.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/routes_api.py>)
+
+9. Medium — Missing/invalid token handling
+- ID: TC-09
+- Title: Protected routes reject missing or invalid JWTs
+- Preconditions:
+  - None.
+- Steps:
+  1. Call `/api/me` without an `Authorization` header.
+  2. Call `/api/me` with an invalid token.
+- Expected result:
+  - Both return 401 Unauthorized.
+  - The response is consistent and does not expose internal details.
+- Target file: [Voice-transcriber/auth.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/auth.py>)
+
+10. Medium — Startup configuration fails safely
+- ID: TC-10
+- Title: Missing production secrets do not silently create insecure defaults
+- Preconditions:
+  - Run the app with missing or weak admin credentials.
+- Steps:
+  1. Start the app without `JWT_SECRET` and with blank/weak admin credentials.
+  2. Observe startup behavior.
+- Expected result:
+  - The app either fails fast in production mode or clearly warns without exposing sensitive defaults in logs.
+  - A generated admin password is not silently used in an unsafe deployment context.
+- Target files: [Voice-transcriber/auth.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/auth.py>) and [Voice-transcriber/server.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/server.py>)
+
+11. Medium — Logging does not leak transcript content
+- ID: TC-11
+- Title: Verbose debug logging does not expose user content in production logs
+- Preconditions:
+  - Enable the translation/transcription debug path.
+- Steps:
+  1. Send speech/transcript content through the relevant endpoint.
+  2. Inspect logs.
+- Expected result:
+  - Sensitive content is not emitted to logs by default.
+  - Logging is controlled by configuration and can be disabled.
+- Target file: [Voice-transcriber/translate.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/translate.py>)
+
+12. Medium — Setup instructions are accurate
+- ID: TC-12
+- Title: Repository setup works from a fresh clone
+- Preconditions:
+  - Fresh environment without prior setup.
+- Steps:
+  1. Clone the repo.
+  2. Follow the documented setup/run steps.
+  3. Try to start the app from the documented location.
+- Expected result:
+  - The instructions are accurate and the app starts successfully.
+  - A real `.env.example` is present and the correct startup command is documented.
+- Target files: [README.md](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/README.md>) and [Voice-transcriber/server.py](<D:/My Projects/Zenoscribe.worktrees/production-readiness-code-review/Voice-transcriber/server.py>)
+
+If you want, I can turn these into:
+- pytest test skeletons,
+- Playwright UI tests,
+- or a checklist in a format ready to paste into your issue tracker.
