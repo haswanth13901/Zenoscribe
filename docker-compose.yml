@@ -1,13 +1,11 @@
-version: '3.8'
-
 services:
   web:
     build: .
     ports:
       - "8000:8000"
     env_file:
-      - Voice-transcriber/.env
+      - .env
     volumes:
       - ./:/app
-    command: uvicorn Voice-transcriber.server:app --host 0.0.0.0 --port 8000
+    command: uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000
     restart: unless-stopped

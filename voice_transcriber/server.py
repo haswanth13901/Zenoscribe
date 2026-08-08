@@ -17,13 +17,22 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-import auth
-import config
-import db
-import languages
-import routes_api
-import transcribe
-import translate
+try:
+    from . import auth
+    from . import config
+    from . import db
+    from . import languages
+    from . import routes_api
+    from . import transcribe
+    from . import translate
+except ImportError:  # run flat from inside the package dir
+    import auth
+    import config
+    import db
+    import languages
+    import routes_api
+    import transcribe
+    import translate
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("server")
