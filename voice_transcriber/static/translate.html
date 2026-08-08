@@ -132,8 +132,11 @@
 const $ = s => document.querySelector(s);
 const token = sessionStorage.getItem('token');
 const me = JSON.parse(sessionStorage.getItem('user') || 'null');
-if (!token || !me) location.href = '/login';
-if (me) $('#who').textContent = me.username;
+if (!token || !me) {
+  location.replace('/login');
+  throw new Error('redirecting to login');
+}
+$('#who').textContent = me.username;
 
 let ws, ctx, node, stream, running = false;
 let mode = 'one_way';

@@ -72,18 +72,23 @@ async def login_page():
 
 
 @app.get("/app")
+@app.get("/app/")
 async def app_page():
     # The page itself is public; its JS redirects without a token and every
-    # API call behind it is authenticated server-side.
+    # API call behind it is authenticated server-side. Both the bare and
+    # trailing-slash forms are served directly so a stray slash doesn't cause
+    # a 307 redirect that can compound with the client-side auth redirect.
     return FileResponse(f"{config.STATIC_DIR}/index.html")
 
 
 @app.get("/admin")
+@app.get("/admin/")
 async def admin_page():
     return FileResponse(f"{config.STATIC_DIR}/admin.html")
 
 
 @app.get("/translate")
+@app.get("/translate/")
 async def translate_page():
     return FileResponse(f"{config.STATIC_DIR}/translate.html")
 
