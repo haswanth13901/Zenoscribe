@@ -3,17 +3,23 @@ name: Playwright E2E Upload
 on:
   push:
     paths:
-      - 'Voice-transcriber/**'
+      - 'voice_transcriber/**'
+      - '.github/workflows/playwright-e2e.yml'
+      - 'requirements.txt'
   pull_request:
     paths:
-      - 'Voice-transcriber/**'
+      - 'voice_transcriber/**'
+      - '.github/workflows/playwright-e2e.yml'
+      - 'requirements.txt'
 
 jobs:
   e2e-playwright:
     runs-on: ubuntu-latest
     env:
       ALLOW_TEST_HOOKS: 'true'
-      # Set TEST_HOOK_SECRET via repository/organization secrets for safety
+      # Provide TEST_HOOK_SECRET via repository/organization secrets. The test
+      # sets its own value internally, but exporting it here keeps the job's
+      # environment consistent if the test ever reads it from the environment.
       TEST_HOOK_SECRET: ${{ secrets.TEST_HOOK_SECRET }}
 
     steps:
@@ -21,24 +27,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
-          # Install pinned requirements if present, then ensure Playwright + pytest are available
+          python -m pip install --upgrade pip
+          # Install pinned requirements (playwright, pytest, etc. are pinned there),
+          # then ensure the Playwright pytest plugin is present.
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install --upgrade pip
-          pip install pytest playwright pytest-playwright requests
+          pip install pytest-playwright requests
 
       - name: Install Playwright browsers
-        run: |
-          # Install browser binaries required by Playwright
-          python -m playwright install --with-deps
+        run: python -m playwright install --with-deps chromium
 
       - name: Run Playwright E2E test
-        run: |
-          # Run only the E2E test file to keep job focused
-          python -m pytest Voice-transcriber/tests/test_e2e_playwright_upload.py -q
+        run: python -m pytest voice_transcriber/tests/test_e2e_playwright_upload.py -q
         timeout-minutes: 20
