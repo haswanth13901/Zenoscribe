@@ -3,12 +3,18 @@ import time
 import requests
 from dotenv import load_dotenv
 
-REST = "https://api.soniox.com"
+REST = os.environ.get("SONIOX_REST_URL", "https://api.soniox.com")
 WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
 ASYNC_MODEL = "stt-async-v5"
 RT_MODEL = "stt-rt-v5"
 BATCH_POLL_TIMEOUT = 600
+
+# Network timeouts (in seconds)
+# Allow overriding from environment for testing/CI (e.g. use a small value to fail fast)
+UPLOAD_TIMEOUT = int(os.environ.get('SONIOX_UPLOAD_TIMEOUT', '30'))
+POLL_REQUEST_TIMEOUT = int(os.environ.get('SONIOX_POLL_REQUEST_TIMEOUT', '10'))
+TRANSCRIPTION_INIT_TIMEOUT = int(os.environ.get('SONIOX_TRANSCRIPTION_INIT_TIMEOUT', '10'))
 
 def get_api_key():
     load_dotenv(override=True)
@@ -19,19 +25,19 @@ def get_headers():
 
 def delete_remote_file(file_id):
     try:
-        resp = requests.delete(f"{REST}/v1/files/{file_id}", headers=get_headers())
+        resp = requests.delete(f"{REST}/v1/files/{file_id}", headers=get_headers(), timeout=POLL_REQUEST_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException:
         pass
 
 def delete_transcription(job_id):
     try:
-        resp = requests.delete(f"{REST}/v1/transcriptions/{job_id}", headers=get_headers())
+        resp = requests.delete(f"{REST}/v1/transcriptions/{job_id}", headers=get_headers(), timeout=POLL_REQUEST_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException:
         try:
             resp = requests.post(
-                f"{REST}/v1/transcriptions/{job_id}/cancel", headers=get_headers()
+                f"{REST}/v1/transcriptions/{job_id}/cancel", headers=get_headers(), timeout=POLL_REQUEST_TIMEOUT
             )
             resp.raise_for_status()
         except requests.RequestException:
@@ -139,12 +145,53 @@ def tts_config(voice, language, stream_id, sample_rate=TTS_SAMPLE_RATE):
     }
 
 
-def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, language_hints=("en",)):
-    """Upload a file, wait for the job, return merged speaker turns."""
-    with open(path, "rb") as f:
-        resp = requests.post(f"{REST}/v1/files", headers=get_headers(), files={"file": f})
-    resp.raise_for_status()
-    file_id = resp.json()["id"]
+# Test-only fake mode (None unless set by tests). Use set_test_fake_mode()/get_test_fake_mode().
+_TEST_FAKE_MODE = None
+
+def set_test_fake_mode(mode: str):
+    """Set test fake mode. Accepted values: 'timeout','runtime','ok', or None to clear."""
+    global _TEST_FAKE_MODE
+    _TEST_FAKE_MODE = mode
+
+
+def get_test_fake_mode():
+    return _TEST_FAKE_MODE
+
+
+def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, language_hints=("en",), target_language=None):
+    """Upload a file, wait for the job, return merged speaker turns.
+
+    If target_language is provided, request a one-way translation from Soniox
+    and return the merged translated turns (tokens where translation_status == 'translation').
+
+    TEST HOOK: when a test fake mode is set (via set_test_fake_mode) or the
+    TEST_FAKE_TRANSCRIBE_MODE environment variable is present, this function
+    simulates behavior for end-to-end tests without contacting Soniox.
+    Allowed values: 'timeout', 'runtime', 'ok'.
+    """
+    # Test-only shortcut to simulate upstream behavior without network calls.
+    fake_mode = get_test_fake_mode() or os.environ.get('TEST_FAKE_TRANSCRIBE_MODE')
+    if fake_mode:
+        if fake_mode == 'timeout':
+            raise TimeoutError('simulated upstream timeout (TEST_FAKE_TRANSCRIBE_MODE)')
+        if fake_mode == 'runtime':
+            raise RuntimeError('simulated upstream runtime error (TEST_FAKE_TRANSCRIBE_MODE)')
+        if fake_mode == 'ok':
+            if target_language:
+                return [{"speaker": "spk1", "text": "Bonjour le monde", "start": 0.0, "end": 1.0}]
+            return [{"speaker": "spk1", "text": "Hello world", "start": 0.0, "end": 1.0}]
+
+    job_id = None
+    # Upload file (may be larger so allow a longer timeout)
+    try:
+        with open(path, "rb") as f:
+            resp = requests.post(f"{REST}/v1/files", headers=get_headers(), files={"file": f}, timeout=UPLOAD_TIMEOUT)
+        resp.raise_for_status()
+        file_id = resp.json()["id"]
+    except requests.Timeout:
+        raise TimeoutError(f"upload to Soniox timed out after {UPLOAD_TIMEOUT}s")
+    except requests.RequestException as e:
+        raise RuntimeError(f"failed to upload file to Soniox: {e}")
 
     body = {
         "file_id": file_id,
@@ -153,18 +200,39 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
     }
     if language_hints:
         body["language_hints"] = list(language_hints)
+    if target_language:
+        # Request server-side translation of the transcript into target_language.
+        body["translation"] = {"type": "one_way", "target_language": target_language}
 
-    job_id = None
-    resp = requests.post(f"{REST}/v1/transcriptions", headers=get_headers(), json=body)
-    resp.raise_for_status()
-    job_id = resp.json()["id"]
+    try:
+        resp = requests.post(f"{REST}/v1/transcriptions", headers=get_headers(), json=body, timeout=TRANSCRIPTION_INIT_TIMEOUT)
+        resp.raise_for_status()
+        job_id = resp.json()["id"]
+    except requests.Timeout:
+        cleanup_remote_resources(file_id=file_id, job_id=None)
+        raise TimeoutError(f"starting transcription timed out after {TRANSCRIPTION_INIT_TIMEOUT}s")
+    except requests.RequestException as e:
+        cleanup_remote_resources(file_id=file_id, job_id=None)
+        raise RuntimeError(f"failed to start transcription: {e}")
 
     start = time.time()
     try:
         while True:
-            status = requests.get(
-                f"{REST}/v1/transcriptions/{job_id}", headers=get_headers()
-            ).json()
+            try:
+                status_resp = requests.get(
+                    f"{REST}/v1/transcriptions/{job_id}", headers=get_headers(), timeout=POLL_REQUEST_TIMEOUT
+                )
+                status = status_resp.json()
+            except requests.Timeout:
+                # Treat poll timeouts as transient; fail fast only if overall timeout exceeded
+                if time.time() - start >= timeout:
+                    raise TimeoutError(f"remote transcription did not complete within {timeout}s")
+                time.sleep(poll_interval)
+                continue
+            except requests.RequestException as e:
+                # Network or other error polling the job
+                raise RuntimeError(f"error polling transcription status: {e}")
+
             state = status.get("status")
             if state == "completed":
                 break
@@ -176,9 +244,19 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
                 )
             time.sleep(poll_interval)
 
-        tokens = requests.get(
-            f"{REST}/v1/transcriptions/{job_id}/transcript", headers=get_headers()
-        ).json()["tokens"]
+        try:
+            tokens = requests.get(
+                f"{REST}/v1/transcriptions/{job_id}/transcript", headers=get_headers(), timeout=POLL_REQUEST_TIMEOUT
+            ).json()["tokens"]
+        except requests.Timeout:
+            raise TimeoutError(f"fetching transcript timed out after {POLL_REQUEST_TIMEOUT}s")
+        except requests.RequestException as e:
+            raise RuntimeError(f"failed to fetch transcript: {e}")
+
+        # If translation was requested, pick translation tokens only
+        if target_language:
+            trans_tokens = [t for t in tokens if t.get("translation_status") == "translation"]
+            return merge_tokens(trans_tokens)
 
         return merge_tokens(tokens)
     finally:

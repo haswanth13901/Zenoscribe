@@ -36,12 +36,14 @@ def _startup():
     db.init()
     seeded = auth.ensure_seed_admin()
     if seeded:
-        username, generated_pw = seeded
-        if generated_pw:
+        username, generated_flag = seeded
+        if generated_flag:
+            # In non-production, a generated password was used. Avoid logging the
+            # actual password so it doesn't leak into logs; instruct the operator
+            # to rotate it after first login.
             log.warning(
-                "Created admin '%s' with generated password: %s  "
-                "(change it after first login)",
-                username, generated_pw,
+                "Created admin '%s' with a generated password (development/testing only). Change it after first login.",
+                username,
             )
         else:
             log.info("Created admin '%s' from ADMIN_PASSWORD", username)

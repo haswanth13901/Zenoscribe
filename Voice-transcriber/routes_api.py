@@ -163,7 +163,7 @@ async def admin_set_active(
     # Guard against an admin locking themselves - and possibly everyone -
     # out of the system.
     if not body.is_active:
-        if target["id"] == admin["id"]:
+        if str(target["id"]) == str(admin["id"]):
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "Cannot deactivate yourself"
             )
@@ -186,7 +186,7 @@ async def admin_delete_user(user_id: str, admin=Depends(auth.current_admin)):
     target = db.get_user(user_id)
     if not target:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-    if target["id"] == admin["id"]:
+    if str(target["id"]) == str(admin["id"]):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot delete yourself")
     if target["role"] == "admin" and db.count_admins() <= 1:
         raise HTTPException(
@@ -204,6 +204,44 @@ async def admin_delete_user(user_id: str, admin=Depends(auth.current_admin)):
             except OSError:
                 log.warning("could not remove %s", name)
     return {"ok": True, "removed_recordings": len(files)}
+
+
+# ------------------------------------------------------ internal test hooks
+
+@router.post("/internal/test-hook/transcribe_mode")
+async def set_transcribe_fake_mode(request: Request, payload: dict, admin=Depends(auth.current_admin)):
+    """Set a test-only fake mode for soniox_client.transcribe_file.
+
+    Allowed modes: 'timeout', 'runtime', 'ok', or null to clear.
+    This endpoint is gated by config.ALLOW_TEST_HOOKS and requires an
+    additional X-TEST-HOOK-SECRET header if TEST_HOOK_SECRET is set. It is
+    also restricted to localhost when RESTRICT_TEST_HOOK_TO_LOCALHOST is True.
+    """
+    if not config.ALLOW_TEST_HOOKS:
+        # Hide the endpoint in production by returning 404
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+    # Optional secret header
+    secret = request.headers.get("x-test-hook-secret")
+    if config.TEST_HOOK_SECRET and secret != config.TEST_HOOK_SECRET:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid test hook secret")
+
+    # Optional network restriction
+    if config.RESTRICT_TEST_HOOK_TO_LOCALHOST:
+        client_host = request.client.host if request.client else None
+        if client_host not in ("127.0.0.1", "::1", "localhost"):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Test hook allowed only from localhost")
+
+    mode = payload.get("mode") if isinstance(payload, dict) else None
+    if mode is None:
+        sx.set_test_fake_mode(None)
+        log.info("test hook: cleared fake transcribe mode (by %s)", admin["username"]) if admin else None
+        return {"ok": True, "mode": None}
+    if mode not in ("timeout", "runtime", "ok"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid mode")
+    sx.set_test_fake_mode(mode)
+    log.info("test hook: set fake transcribe mode=%s (by %s)", mode, admin["username"]) if admin else None
+    return {"ok": True, "mode": mode}
 
 
 # ---------------------------------------------------------- recordings
@@ -301,25 +339,105 @@ async def transcribe_upload(
             pass
 
     suffix = os.path.splitext(file.filename)[1] or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        size = 0
-        while True:
-            chunk = await file.read(64 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > config.MAX_UPLOAD_SIZE:
+    path = None
+    try:
+        # Write the upload to a temp file, enforcing size limits while streaming.
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            path = tmp.name
+            size = 0
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > config.MAX_UPLOAD_SIZE:
+                    # Ensure the tmp file is removed before returning a 413.
+                    tmp.close()
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
+                    )
+                tmp.write(chunk)
+
+        # Process the file in a background thread and map known upstream errors.
+        try:
+            turns = await asyncio.to_thread(sx.transcribe_file, path)
+            return {"turns": turns}
+        except TimeoutError as e:
+            # Upstream transcription timed out
+            raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")
+        except RuntimeError as e:
+            # Soniox reported an error or a network/runtime issue occurred
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Transcription service error: {e}")
+        except Exception as e:
+            log.exception("unexpected error during transcription: %s", e)
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal transcription error")
+    finally:
+        # Always remove the temporary file if it was created.
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                log.exception("could not delete temp upload %s", path)
+
+
+# ---- Transcribe + Translate endpoint ----
+@router.post("/api/transcribe/translate")
+async def transcribe_and_translate(
+    request: Request,
+    file: UploadFile = File(...),
+    target_language: str = None,
+    _=Depends(auth.current_user),
+):
+    """Upload audio, run STT and server-side one-way translation (Soniox), and
+    return translated speaker turns. If target_language is omitted, behaves
+    like /api/transcribe but is still useful as a distinct endpoint.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > config.MAX_UPLOAD_SIZE:
                 raise HTTPException(
                     status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                     f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
                 )
-            tmp.write(chunk)
-        path = tmp.name
+        except ValueError:
+            pass
+
+    suffix = os.path.splitext(file.filename)[1] or ".wav"
+    path = None
     try:
-        turns = await asyncio.to_thread(sx.transcribe_file, path)
-        return {"turns": turns}
-    finally:
+        # Stream upload to temp file, enforcing size limits.
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            path = tmp.name
+            size = 0
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > config.MAX_UPLOAD_SIZE:
+                    tmp.close()
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
+                    )
+                tmp.write(chunk)
+
+        # Call soniox_client to transcribe and (optionally) translate.
         try:
-            os.unlink(path)
-        except OSError:
-            log.exception("could not delete temp upload %s", path)
+            turns = await asyncio.to_thread(sx.transcribe_file, path, target_language=target_language)
+            return {"turns": turns}
+        except TimeoutError as e:
+            raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")
+        except RuntimeError as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Transcription service error: {e}")
+        except Exception as e:
+            log.exception("unexpected error during transcribe+translate: %s", e)
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal transcription error")
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                log.exception("could not delete temp upload %s", path)

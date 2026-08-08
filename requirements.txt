@@ -17,3 +17,13 @@ requests==2.32.3
 sounddevice==0.5.1
 numpy==2.1.3
 scipy==1.14.1
+
+# Testing & E2E
+pytest>=8.0.0
+pytest-asyncio>=0.22.0
+pytest-playwright>=0.4.0
+playwright>=1.40.0
+
+# Optional dev tools
+flake8>=6.0.0
+black>=24.3.0
