@@ -77,6 +77,47 @@ TEST_HOOK_SECRET=
 RESTRICT_TEST_HOOK_TO_LOCALHOST=true
 ```
 
+2a) Generate secrets
+
+`JWT_SECRET` and `TEST_HOOK_SECRET` are independent random strings — generate a
+separate value for each; do not reuse one for both. `JWT_SECRET` signs login
+tokens and is security-critical (rotating it invalidates all existing logins).
+`TEST_HOOK_SECRET` is only a shared password on the test-hook endpoint and is
+only used when `ALLOW_TEST_HOOKS=true`.
+
+Generate a value with any of these:
+
+```bash
+# Python (matches what the app uses internally)
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+# or OpenSSL (macOS/Linux)
+openssl rand -base64 48
+```
+
+On Windows PowerShell, the Python one-liner above works as-is.
+
+Paste the first value into `JWT_SECRET`:
+
+```
+JWT_SECRET=<generated value>
+```
+
+`TEST_HOOK_SECRET` is only needed if you enable the test hooks in dev. If so,
+generate a second value and set:
+
+```
+ALLOW_TEST_HOOKS=true
+TEST_HOOK_SECRET=<second generated value>
+RESTRICT_TEST_HOOK_TO_LOCALHOST=true
+```
+
+Leave `ALLOW_TEST_HOOKS=false` (and `TEST_HOOK_SECRET` blank) for normal
+development and in any deployed environment. When enabled, calls to
+`/internal/test-hook/transcribe_mode` must include a matching
+`X-TEST-HOOK-SECRET` header and an admin JWT, and are accepted only from
+localhost unless `RESTRICT_TEST_HOOK_TO_LOCALHOST=false`.
+
 3) Start the app (development)
 
 ```bash
@@ -251,4 +292,3 @@ Neither is committed to git (see `.gitignore`).
 `soniox_client.transcribe_file(path)` uploads a `.wav`/`.mp3` and returns merged
 speaker turns using the async API, which has full-file context and is more
 accurate than the live path. Exposed at `POST /api/transcribe` (authenticated).
-
