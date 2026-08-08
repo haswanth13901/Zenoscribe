@@ -157,8 +157,14 @@ CI / E2E tests
 
 - The repository includes an opinionated GitHub Actions workflow that runs the
   Playwright E2E test (`.github/workflows/playwright-e2e.yml`). The workflow
-  expects `TEST_HOOK_SECRET` to be provided via repository secrets and enables
-  test hooks during the job.
+  references `TEST_HOOK_SECRET` from repository secrets and enables test hooks
+  during the job.
+- To set it: GitHub repo → Settings → Secrets and variables → Actions → New
+  repository secret, with name `TEST_HOOK_SECRET` and any random value. Never
+  commit the value itself — it lives only in the encrypted secrets store.
+- This secret is optional for the bundled E2E test, which sets its own hook
+  secret internally; providing it just keeps the job environment consistent for
+  any future test that reads it from the environment.
 
 Troubleshooting
 
