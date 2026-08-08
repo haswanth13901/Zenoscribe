@@ -51,10 +51,10 @@ pip install -r requirements.txt
 Copy the example file and populate values. Do not commit real secrets to git.
 
 ```bash
-cp voice_transcriber/.env.example voice_transcriber/.env
+cp .env.example .env
 ```
 
-Edit `voice_transcriber/.env` and set at minimum:
+Edit `.env` and set at minimum:
 
 ```
 # Soniox API key (required for transcription)
