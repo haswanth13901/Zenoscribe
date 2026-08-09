@@ -18,10 +18,16 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from websockets import connect
 from websockets.exceptions import ConnectionClosedOK
 
-import auth
-import config
-import db
-import soniox_client as sx
+try:
+    from . import auth
+    from . import config
+    from . import db
+    from . import soniox_client as sx
+except ImportError:  # run flat from inside the package dir
+    import auth
+    import config
+    import db
+    import soniox_client as sx
 
 log = logging.getLogger("transcribe")
 

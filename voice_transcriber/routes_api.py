@@ -16,10 +16,16 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-import auth
-import config
-import db
-import soniox_client as sx
+try:
+    from . import auth
+    from . import config
+    from . import db
+    from . import soniox_client as sx
+except ImportError:  # run flat from inside the package dir
+    import auth
+    import config
+    import db
+    import soniox_client as sx
 
 log = logging.getLogger("api")
 
