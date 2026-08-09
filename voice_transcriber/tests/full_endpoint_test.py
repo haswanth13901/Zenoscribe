@@ -1,8 +1,10 @@
 import os
+import sys
 import requests
 import time
 import json
 
+sys.path.insert(0, os.getcwd())
 import db
 import auth
 import config
