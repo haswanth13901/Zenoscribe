@@ -108,7 +108,27 @@ app.include_router(routes_api.router)
 app.include_router(transcribe.router)
 app.include_router(translate.router)
 
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles that forces revalidation on every request.
+
+    Without an explicit Cache-Control header, browsers apply their own
+    heuristic freshness lifetime and can keep serving an old cached copy of
+    a JS/CSS file for a while without ever asking the server - which is
+    exactly what let a stale header.js linger in a browser after an update.
+    ETag/Last-Modified based conditional requests already work correctly
+    (StaticFiles handles those), so "no-cache" (not "no-store") is enough:
+    the browser still caches the body, it just always revalidates first,
+    getting a cheap 304 when nothing changed and the real bytes only when
+    something did.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # NOTE: the recordings directory is deliberately NOT mounted as static.
 # Serving it would let anyone with a filename bypass auth entirely.
 # All access goes through /api/recordings/{id}/audio, which checks ownership.
-app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
+app.mount("/static", NoCacheStaticFiles(directory=config.STATIC_DIR), name="static")

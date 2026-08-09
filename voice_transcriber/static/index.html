@@ -21,6 +21,10 @@
     padding: 14px 20px; border-bottom: 1px solid var(--line);
     display: flex; align-items: center; gap: 14px;
   }
+  .toolbar {
+    padding: 10px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  }
   h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .2px; }
   .spacer { flex: 1; }
   button {
@@ -82,20 +86,22 @@
 </head>
 <body>
 
-<header>
-  <h1>Zenoscribe</h1>
+<header id="appHeader">
   <span id="status">idle</span>
   <span class="spacer"></span>
   <span class="who" id="who"></span>
-  <button id="adminBtn" hidden onclick="location.href='/admin'">Admin</button>
-  <button onclick="location.href='/translate'">Translate</button>
-  <button id="histBtn">My recordings</button>
-  <button id="out">Sign out</button>
+</header>
+
+<div class="toolbar">
+  <button id="toggle">Start</button>
   <button id="clear">Clear</button>
   <button id="save">Save</button>
+</div>
+
+<div id="featureStaging" hidden>
   <button id="uploadBtn">Upload</button>
-  <button id="toggle">Start</button>
-</header>
+  <button id="histBtn">My recordings</button>
+</div>
 
 <main><div id="transcript"><div class="empty">Press Start and speak.</div></div></main>
 
@@ -129,7 +135,6 @@ if (!token || !me) {
   throw new Error('redirecting to login');
 }
 $('#who').textContent = me.username;
-if (me.role === 'admin') $('#adminBtn').hidden = false;
 
 let ws, ctx, node, stream, running = false, connecting = false;
 let partialEl = null;
@@ -354,7 +359,6 @@ $('#dclear').onclick = () => {
   $('#dfrom').value = ''; $('#dto').value = ''; loadHistory();
 };
 $('#dclose').onclick = () => { $('#drawer').hidden = true; };
-$('#out').onclick = () => { sessionStorage.clear(); location.href = '/login'; };
 
 $('#save').onclick = () => {
   if (!turns.length) return;
@@ -368,6 +372,8 @@ $('#save').onclick = () => {
   URL.revokeObjectURL(url);
 };
 </script>
+<script src="/static/header.js"></script>
+<script src="/static/sidebar.js"></script>
 <script src="/static/upload.js"></script>
 </body>
 </html>

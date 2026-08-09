@@ -63,13 +63,10 @@
 </head>
 <body data-mode="one_way">
 
-<header>
-  <h1>Zenoscribe · Translate</h1>
+<header id="appHeader">
   <span id="status">idle</span>
   <span class="spacer"></span>
   <span class="who" id="who"></span>
-  <button onclick="location.href='/app'">Recorder</button>
-  <button id="out">Sign out</button>
 </header>
 
 <div class="controls">
@@ -340,9 +337,9 @@ $('#restart').onclick = async () => {
   }
 };
 
-$('#out').onclick = () => { sessionStorage.clear(); location.href = '/login'; };
-
 loadOptions();
 </script>
+<script src="/static/header.js"></script>
+<script src="/static/sidebar.js"></script>
 </body>
 </html>
