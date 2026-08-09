@@ -44,5 +44,5 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: Run Playwright E2E test
-        run: python -m pytest voice_transcriber/tests/test_e2e_playwright_upload.py -q
+        run: python -m pytest voice_transcriber/tests/test_e2e_playwright_upload.py -m integration -q
         timeout-minutes: 20

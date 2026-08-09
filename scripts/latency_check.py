@@ -1,3 +1,11 @@
+"""Manual diagnostic: eyeball request latency against a running dev server.
+
+Not a pytest test - no assertions, just prints min/avg/max response time.
+Start the server yourself first, then run this:
+
+    python -m uvicorn voice_transcriber.server:app --port 8000
+    python scripts/latency_check.py
+"""
 import time
 import urllib.request
 

@@ -205,11 +205,21 @@ python -m uvicorn voice_transcriber.server:app --port 8000
 # then open http://localhost:8000
 ```
 
-3) Run unit/E2E tests (Playwright must be installed):
+3) Run the test suite (Playwright must be installed for the E2E test):
 
 ```bash
-# Run pytest and the focused E2E test
-pytest -q voice_transcriber/tests/test_e2e_playwright_upload.py
+# Fast suite: isolated unit/API tests (no live server, no network, <10s)
+pytest -q
+
+# Full black-box E2E test: launches a real server subprocess + headless
+# Chromium via Playwright
+pytest -q -m integration
+
+# Real Soniox network tests. The network-timeout test always runs; the
+# credentialed test spends real API quota and stays skipped unless you
+# explicitly opt in (SONIOX_API_KEY alone is not enough, since .env can
+# supply it without you intending to spend it in a test run):
+RUN_REAL_SONIOX_TESTS=true pytest -q -m real_network
 ```
 
 4) Run with Docker (local parity with CI):
@@ -237,6 +247,10 @@ static/
   login.html      Sign-in page
   index.html      Recorder + history drawer
   admin.html      Admin console
+  translate.html  Live speech-to-speech translation
+  header.js       Shared header: home button + sign out (all authenticated pages)
+  sidebar.js      Shared left-hand nav: Record, Upload, Translate, My recordings, Admin console
+  upload.js       Shared file-upload transcription feature (index.html, admin.html)
   pcm-worklet.js  Browser mic -> 16 kHz PCM
 ```
 
@@ -301,10 +315,12 @@ Neither is committed to git (see `.gitignore`).
 
 - Login issues a JWT stored in the browser's `sessionStorage`, so closing the
   tab clears the session.
-- Every protected page (`/app`, `/admin`, `/translate`) validates its stored
-  token against the server (`/api/me`) on load and stays hidden until the token
-  is confirmed. A stale or expired token bounces the user straight to `/login`
-  instead of briefly showing signed-in content.
+- Every protected page (`/app`, `/admin`, `/translate`) checks `sessionStorage`
+  for a token and user on load and redirects to `/login` immediately if either
+  is missing — the page itself is not gated server-side, but every API call
+  behind it is. A token that's present but stale/expired/invalid is only
+  caught on the first authenticated request: the shared `api()`/fetch wrapper
+  on each page clears storage and redirects to `/login` on a `401`.
 - Tokens expire after `TOKEN_HOURS` (default 8). Expiry is baked into each
   token, so a continuously running server does not keep anyone logged in past
   their window — the next request after expiry returns 401 and the page

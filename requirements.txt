@@ -20,10 +20,10 @@ numpy==2.5.1
 scipy==1.18.0
 
 # Testing & E2E
-pytest>=9.0.0
-pytest-asyncio>=1.4.0
-pytest-playwright>=0.8.0
-playwright>=1.62.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-playwright==0.8.0
+playwright==1.62.0
 
 # Optional dev tools
 flake8>=7.0.0
