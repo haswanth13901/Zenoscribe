@@ -1,4 +1,3 @@
-<# PowerShell bootstrap for Windows devs #>
 Set-StrictMode -Version Latest
 
 Write-Host "[bootstrap] Creating Python virtual environment in .venv"
@@ -18,7 +17,6 @@ if (Test-Path requirements.txt) {
     Write-Warning "requirements.txt not found. Install dependencies manually."
 }
 
-# Install Playwright browsers
 try {
     python -m playwright --version | Out-Null
     Write-Host "[bootstrap] Installing Playwright browsers"

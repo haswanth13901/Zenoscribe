@@ -123,9 +123,6 @@ def count_recent_failed_logins(username: str, ip: str, window_sec: int):
         conn.close()
 
 
-# ---------------------------------------------------------------- users
-
-
 def create_user(username, password_hash, full_name="", email="",
                 role="user", created_by=None):
     """Create a new user or update an existing one with the provided values.
@@ -150,7 +147,6 @@ def create_user(username, password_hash, full_name="", email="",
             )
             conn.commit()
             return uid
-        # otherwise insert new
         uid = uuid.uuid4().hex
         conn.execute(
             """INSERT INTO users
@@ -318,14 +314,9 @@ def count_admins():
         conn.close()
 
 
-# ----------------------------------------------------------- recordings
-
-
 def add_recording(rec_id, user_id, wav_file, txt_file, started_at,
                   duration, turn_count, preview):
-    """Insert or update a recording entry. If a recording with the same id
-    already exists, update it so test setup is idempotent.
-    """
+    """Insert or update a recording entry (idempotent on rec_id)."""
     conn = connect()
     try:
         existing = conn.execute(
@@ -367,7 +358,6 @@ def list_recordings(user_id=None, date_from=None, date_to=None, limit=200):
         where.append("r.started_at >= ?")
         params.append(f"{date_from}T00:00:00")
     if date_to:
-        # '<=' against end-of-day so the whole 'to' date is included.
         where.append("r.started_at <= ?")
         params.append(f"{date_to}T23:59:59.999999")
 

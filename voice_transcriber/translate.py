@@ -38,15 +38,9 @@ except ImportError:  # run flat from inside the package dir
 
 log = logging.getLogger("translate")
 
-# Controlled by config.DEBUG_TOKENS (default False). Avoid logging token text
-# in production since it may contain user speech/transcript content.
 DEBUG_TOKENS = getattr(config, 'DEBUG_TOKENS', False)
 
 router = APIRouter()
-
-# Cap the concurrent target-language TTS streams we open per session, so a
-# runaway source can't spawn unbounded upstream connections.
-MAX_ACTIVE_TTS = 4
 
 
 @router.websocket("/ws/translate")
@@ -68,7 +62,7 @@ async def translate(client: WebSocket):
 
     # ---- read + validate settings from the hello frame ----
     mode = hello.get("mode", "one_way")
-    speak = bool(hello.get("speak", True))         # voice-out on/off
+    speak = bool(hello.get("speak", True))
     voice = hello.get("voice", "Maya")
     diarize = bool(hello.get("diarize", False))    # label who said what
 
@@ -207,7 +201,6 @@ async def translate(client: WebSocket):
 
                     endpoint = bool(payload.get("is_endpoint") or payload.get("endpoint"))
 
-                    # Rebuilt fresh from this payload's non-final tokens.
                     src_partial = ""
                     tgt_partial = ""
 
@@ -217,7 +210,6 @@ async def translate(client: WebSocket):
                         lang = tok.get("language")
 
                         if DEBUG_TOKENS and text:
-                            # Only log full text when explicit debug mode is enabled.
                             log.info("TOK status=%s lang=%s final=%s text=%r",
                                      status, lang, tok.get("is_final"), text)
                         else:
@@ -249,10 +241,6 @@ async def translate(client: WebSocket):
                             else:
                                 tgt_partial += text
                         else:
-                            # Source side. But if the spoken word is already in
-                            # a target language, there's nothing to translate -
-                            # carry it into the translation output too, so mixed
-                            # speech ("Vamos a un meeting") comes out complete.
                             already_target = lang in target_langs
                             if is_final:
                                 src_final["text"] += text
@@ -276,8 +264,6 @@ async def translate(client: WebSocket):
                             if sid is not None:
                                 spk_votes[sid] = spk_votes.get(sid, 0) + 1
 
-                    # Send the complete current text for each side. The browser
-                    # replaces its box contents with this - no accumulation.
                     await to_browser({
                         "type": "captions",
                         "source": (src_final["text"] + src_partial).strip(),

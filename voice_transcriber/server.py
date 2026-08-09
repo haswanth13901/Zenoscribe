@@ -58,9 +58,6 @@ def _startup():
             log.info("Created admin '%s' from ADMIN_PASSWORD", username)
 
 
-# ------------------------------------------------------------------ pages
-
-
 @app.get("/")
 async def root():
     return FileResponse(f"{config.STATIC_DIR}/login.html")
@@ -95,31 +92,20 @@ async def translate_page():
 
 @app.get("/api/languages")
 async def language_list():
-    """Options for the translator dropdowns."""
     return {
         "languages": [{"code": c, "name": n} for c, n in languages.LANGUAGES],
         "voices": ["Maya", "Adrian"],
     }
 
 
-# ---------------------------------------------------------------- routers
-
 app.include_router(routes_api.router)
 app.include_router(transcribe.router)
 app.include_router(translate.router)
 
 class NoCacheStaticFiles(StaticFiles):
-    """StaticFiles that forces revalidation on every request.
-
-    Without an explicit Cache-Control header, browsers apply their own
-    heuristic freshness lifetime and can keep serving an old cached copy of
-    a JS/CSS file for a while without ever asking the server - which is
-    exactly what let a stale header.js linger in a browser after an update.
-    ETag/Last-Modified based conditional requests already work correctly
-    (StaticFiles handles those), so "no-cache" (not "no-store") is enough:
-    the browser still caches the body, it just always revalidates first,
-    getting a cheap 304 when nothing changed and the real bytes only when
-    something did.
+    """Forces revalidation on every request so browsers can't keep serving
+    a stale cached JS/CSS file after an update (ETag-based conditional
+    requests already work, so this costs only a cheap 304 when unchanged).
     """
 
     def file_response(self, *args, **kwargs):

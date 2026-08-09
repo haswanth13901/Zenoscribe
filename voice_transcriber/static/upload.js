@@ -19,7 +19,6 @@
   const uploadBtn = document.getElementById('uploadBtn');
   if (!uploadBtn) return; // page didn't opt in
 
-  // ---- inject the hidden file input ----
   const uploadInput = document.createElement('input');
   uploadInput.type = 'file';
   uploadInput.accept = 'audio/*';
@@ -27,7 +26,6 @@
   uploadInput.id = 'uploadInput';
   document.body.appendChild(uploadInput);
 
-  // ---- inject the result panel ----
   const panel = document.createElement('div');
   panel.id = 'uploadPanel';
   panel.style.cssText = 'max-width:780px;margin:14px auto;display:none;padding:12px;';
@@ -47,7 +45,6 @@
       <div id="uploadResult" class="prev" style="margin-top:10px;color:var(--text);"></div>
       <div id="uploadTranslateResult" class="prev" style="margin-top:10px;color:var(--text);"></div>
     </div>`;
-  // Place the panel right after the <main> if present, else at end of body.
   const main = document.querySelector('main');
   if (main && main.parentNode) {
     main.parentNode.insertBefore(panel, main.nextSibling);

@@ -73,7 +73,6 @@ class SpeakerLabeler:
 
 
 def rt_config(sample_rate=16000, language_hints=None):
-    """Realtime WebSocket handshake config."""
     cfg = {
         "api_key": get_api_key(),
         "model": RT_MODEL,
@@ -86,8 +85,6 @@ def rt_config(sample_rate=16000, language_hints=None):
         cfg["language_hints"] = language_hints
     return cfg
 
-
-# --------------------------------------------------------------- translation
 
 TTS_WS_URL = "wss://tts-rt.soniox.com/tts-websocket"
 TTS_MODEL = "tts-rt-v1"
@@ -169,7 +166,6 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
     simulates behavior for end-to-end tests without contacting Soniox.
     Allowed values: 'timeout', 'runtime', 'ok'.
     """
-    # Test-only shortcut to simulate upstream behavior without network calls.
     fake_mode = get_test_fake_mode() or os.environ.get('TEST_FAKE_TRANSCRIBE_MODE')
     if fake_mode:
         if fake_mode == 'timeout':
@@ -201,7 +197,6 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
     if language_hints:
         body["language_hints"] = list(language_hints)
     if target_language:
-        # Request server-side translation of the transcript into target_language.
         body["translation"] = {"type": "one_way", "target_language": target_language}
 
     try:
@@ -230,7 +225,6 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
                 time.sleep(poll_interval)
                 continue
             except requests.RequestException as e:
-                # Network or other error polling the job
                 raise RuntimeError(f"error polling transcription status: {e}")
 
             state = status.get("status")
@@ -253,7 +247,6 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
         except requests.RequestException as e:
             raise RuntimeError(f"failed to fetch transcript: {e}")
 
-        # If translation was requested, pick translation tokens only
         if target_language:
             trans_tokens = [t for t in tokens if t.get("translation_status") == "translation"]
             return merge_tokens(trans_tokens)

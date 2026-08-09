@@ -132,7 +132,6 @@ def test_admin_can_reset_user_password(client, make_user):
     )
     assert r.status_code == 200
     assert r.json()["ok"] is True
-    # The new password actually works.
     r = client.post("/api/login", json={"username": "ivan", "password": "NewIvanPass123!"})
     assert r.status_code == 200
 

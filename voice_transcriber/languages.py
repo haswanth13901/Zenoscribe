@@ -5,7 +5,6 @@ dropdowns. Codes are ISO 639-1 as Soniox expects them. Extend freely; the
 full list is at soniox.com/docs/translation/supported-languages.
 """
 
-# (code, display name)
 LANGUAGES = [
     ("en", "English"),
     ("es", "Spanish"),

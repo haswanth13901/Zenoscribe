@@ -1,5 +1,3 @@
-"""JWT auth, password hashing, and role guards."""
-
 import logging
 import os
 import secrets
@@ -40,8 +38,6 @@ if _is_production:
         raise RuntimeError("Missing JWT_SECRET in production environment")
     JWT_SECRET = _jwt_env
 elif _dev_rotate:
-    # Dev: rotate on every startup, invalidating all pre-restart tokens so a
-    # server restart sends every open page back to login.
     JWT_SECRET = secrets.token_urlsafe(48)
     log.warning("DEV_ROTATE_JWT_ON_RESTART enabled: rotated JWT secret on startup (all previous sessions invalidated)")
 elif _jwt_env:
@@ -90,7 +86,6 @@ def make_token(user_row) -> str:
 
 
 def decode_token(token: str):
-    """Returns the payload, or None if invalid/expired."""
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
     except jwt.PyJWTError:
@@ -174,7 +169,6 @@ def ensure_seed_admin():
     password = os.environ.get("ADMIN_PASSWORD", "")
     generated = False
 
-    # If running in production, require an explicit, strong ADMIN_PASSWORD.
     if getattr(config, "PRODUCTION", False):
         if not password or len(password) < MIN_PASSWORD_LENGTH:
             log.error("Missing or weak ADMIN_PASSWORD while running in production; refusing to auto-create admin")

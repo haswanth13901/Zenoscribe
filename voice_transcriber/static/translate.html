@@ -78,7 +78,6 @@
     </div>
   </div>
 
-  <!-- one-way: only a target -->
   <div class="field" id="oneway">
     <label>Translate into</label>
     <select id="target"></select>
@@ -87,7 +86,6 @@
     </div>
   </div>
 
-  <!-- two-way: a pair -->
   <div class="field" id="twoway">
     <label>Language A</label>
     <select id="langA"></select>
@@ -138,7 +136,6 @@ $('#who').textContent = me.username;
 let ws, ctx, node, stream, running = false;
 let mode = 'one_way';
 
-// ---- audio playback queue (PCM16 @ 24k from Soniox TTS) ----
 let playCtx = null;
 let playHead = 0;         // scheduling cursor
 function ensurePlayCtx(rate) {
@@ -164,7 +161,6 @@ function playPCM(base64, rate) {
   playHead += buf.duration;
 }
 
-// ---- captions ----
 function clearEmpty(el) { const e = el.querySelector('.empty'); if (e) e.remove(); }
 
 // The server sends the complete current text for each side every frame. The
@@ -183,7 +179,6 @@ function setLive(streamEl, holder, text, speaker) {
     streamEl.appendChild(holder.el);
   }
   if (speaker) {
-    // Speaker label above the line, then the text.
     holder.el.innerHTML =
       `<span class="spk">${speaker}</span>` +
       text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -200,7 +195,6 @@ function closeUtterance() {
   tgtHolder.el = null;
 }
 
-// Empty both boxes back to their placeholder state and reset caption holders.
 function clearTranscript() {
   srcHolder.el = null;
   tgtHolder.el = null;
@@ -208,7 +202,6 @@ function clearTranscript() {
   $('#tgtStream').innerHTML = '<div class="empty">Translation appears here.</div>';
 }
 
-// ---- language options ----
 async function loadOptions() {
   const r = await fetch('/api/languages', { headers: { 'Authorization': 'Bearer ' + token } });
   const { languages, voices } = await r.json();
@@ -222,7 +215,6 @@ async function loadOptions() {
   $('#langB').value = 'es';
 }
 
-// ---- mode toggle ----
 $('#mOne').onclick = () => setMode('one_way');
 $('#mTwo').onclick = () => setMode('two_way');
 function setMode(m) {
@@ -233,7 +225,6 @@ function setMode(m) {
   $('#mTwo').classList.toggle('on', m === 'two_way');
 }
 
-// ---- session ----
 function settings() {
   const base = { token, speak: $('#speak').checked, voice: $('#voice').value,
                  diarize: $('#diarize').checked, mode };
@@ -273,7 +264,6 @@ async function start() {
     } else if (m.type === 'audio') {
       playPCM(m.pcm, 24000);
     } else if (m.type === 'audio_start') {
-      // could show a speaking indicator
     } else if (m.type === 'utterance_end') {
       closeUtterance();
     } else if (m.type === 'timeout') {
@@ -318,8 +308,6 @@ $('#toggle').onclick = () => {
          .finally(() => { $('#toggle').disabled = false; });
 };
 
-// Restart: wipe the transcript and begin a clean session. If one is running,
-// stop it first, then start again once teardown settles.
 $('#restart').onclick = async () => {
   const wasRunning = running;
   if (wasRunning) stop();

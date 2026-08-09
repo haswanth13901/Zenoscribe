@@ -31,7 +31,6 @@ from voice_transcriber.server import app  # noqa: E402
 
 @pytest.fixture
 def isolated_db(tmp_path, monkeypatch):
-    """Point db.py at a private, per-test SQLite file and initialize its schema."""
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
     db.init()
     yield db
@@ -39,7 +38,6 @@ def isolated_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def isolated_recordings(tmp_path, monkeypatch):
-    """Point config.RECORDINGS at a private, per-test directory."""
     recordings_dir = tmp_path / "recordings"
     recordings_dir.mkdir()
     monkeypatch.setattr(config, "RECORDINGS", recordings_dir)

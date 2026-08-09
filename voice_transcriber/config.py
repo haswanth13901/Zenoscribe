@@ -17,7 +17,6 @@ RECORDINGS.mkdir(exist_ok=True)
 
 STATIC_DIR = str(BASE_DIR / "static")
 
-# -------------------------------------------------------- auth settings
 # Protect /api/login from brute-force attempts.
 LOGIN_ATTEMPT_WINDOW_SEC = 300
 LOGIN_ATTEMPT_LIMIT = 5
@@ -27,7 +26,6 @@ LOGIN_ATTEMPT_LIMIT = 5
 MAX_UPLOAD_MB = 20
 MAX_UPLOAD_SIZE = MAX_UPLOAD_MB * 1024 * 1024
 
-# --------------------------------------------------- transcription tuning
 # These only affect the engine in transcribe.py. Adjust them there-and-only
 # there when tuning turn detection; nothing in the auth layer reads them.
 
@@ -51,8 +49,6 @@ VOTE_MARGIN = 2
 # Language passed to Soniox. ["en"] locks English; add more for code-switching.
 LANGUAGE_HINTS = ["en"]
 
-# ------------------------------------------------------------- debugging
-# Log every raw frame Soniox returns.
 DEBUG_SONIOX = False
 # Log the raw speaker ID on each finalized token, to check whether Soniox is
 # separating speakers at all.
@@ -61,11 +57,9 @@ DEBUG_SPEAKERS = False
 # is False; do not enable in production.
 DEBUG_TOKENS = os.environ.get('DEBUG_TOKENS', 'false').lower() in ('1','true','yes')
 
-# ------------------------------------------------------- test hooks (safe-by-default)
 # Allow tests to enable runtime-only admin endpoints that flip fake upstream
 # behavior. This must be explicitly enabled in CI/dev; default is disabled.
 ALLOW_TEST_HOOKS = os.environ.get('ALLOW_TEST_HOOKS', 'false').lower() in ('1','true','yes')
 # Short shared secret required to call test hooks. Set in CI env when enabled.
 TEST_HOOK_SECRET = os.environ.get('TEST_HOOK_SECRET')
-# When true, only accept test-hook requests coming from localhost addresses.
 RESTRICT_TEST_HOOK_TO_LOCALHOST = os.environ.get('RESTRICT_TEST_HOOK_TO_LOCALHOST', 'true').lower() in ('1','true','yes')

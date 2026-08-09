@@ -78,7 +78,6 @@
 </nav>
 
 <main>
-  <!-- USERS -->
   <section id="paneUsers">
     <div class="panel" style="margin-bottom:16px">
       <h2>Register a user</h2>
@@ -107,7 +106,6 @@
     </div>
   </section>
 
-  <!-- RECORDINGS -->
   <section id="paneRecs" hidden>
     <div class="panel">
       <h2>All recordings</h2>
@@ -187,7 +185,6 @@ const fmtDur = s => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-// Considered online if seen within this many minutes.
 const ONLINE_MINUTES = 5;
 
 function sinceText(iso) {
@@ -210,7 +207,6 @@ function presence(lastSeen) {
   return `<span class="dot off"></span><span class="muted">${sinceText(lastSeen)}</span>`;
 }
 
-// ---- users ----
 let users = [];
 
 async function loadUsers() {
@@ -292,7 +288,6 @@ async function delUser(id, name, recs) {
   } catch (e) { alert(e.message); }
 }
 
-// ---- recordings ----
 async function loadRecs() {
   const uid = $('#filter').value;
   const rows = await api('/api/recordings' + recQuery());
@@ -368,7 +363,6 @@ $('#filter').onchange = loadRecs;
 $('#from').onchange = loadRecs;
 $('#to').onchange = loadRecs;
 
-// ---- tabs ----
 $('#tabUsers').onclick = () => {
   $('#paneUsers').hidden = false; $('#paneRecs').hidden = true;
   $('#tabUsers').classList.add('on'); $('#tabRecs').classList.remove('on');

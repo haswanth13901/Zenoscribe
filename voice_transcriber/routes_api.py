@@ -32,9 +32,6 @@ log = logging.getLogger("api")
 router = APIRouter()
 
 
-# ------------------------------------------------------------- schemas
-
-
 class LoginBody(BaseModel):
     username: str
     password: str
@@ -54,9 +51,6 @@ class PasswordBody(BaseModel):
 
 class ActiveBody(BaseModel):
     is_active: bool
-
-
-# ---------------------------------------------------------------- auth
 
 
 @router.post("/api/login")
@@ -98,9 +92,6 @@ async def me(user=Depends(auth.current_user)):
         "email": user["email"],
         "role": user["role"],
     }
-
-
-# --------------------------------------------------- admin: user admin
 
 
 @router.get("/api/admin/users")
@@ -212,8 +203,6 @@ async def admin_delete_user(user_id: str, admin=Depends(auth.current_admin)):
     return {"ok": True, "removed_recordings": len(files)}
 
 
-# ------------------------------------------------------ internal test hooks
-
 @router.post("/internal/test-hook/transcribe_mode")
 async def set_transcribe_fake_mode(request: Request, payload: dict, admin=Depends(auth.current_admin)):
     """Set a test-only fake mode for soniox_client.transcribe_file.
@@ -227,12 +216,10 @@ async def set_transcribe_fake_mode(request: Request, payload: dict, admin=Depend
         # Hide the endpoint in production by returning 404
         raise HTTPException(status.HTTP_404_NOT_FOUND)
 
-    # Optional secret header
     secret = request.headers.get("x-test-hook-secret")
     if config.TEST_HOOK_SECRET and secret != config.TEST_HOOK_SECRET:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid test hook secret")
 
-    # Optional network restriction
     if config.RESTRICT_TEST_HOOK_TO_LOCALHOST:
         client_host = request.client.host if request.client else None
         if client_host not in ("127.0.0.1", "::1", "localhost"):
@@ -248,9 +235,6 @@ async def set_transcribe_fake_mode(request: Request, payload: dict, admin=Depend
     sx.set_test_fake_mode(mode)
     log.info("test hook: set fake transcribe mode=%s (by %s)", mode, admin["username"]) if admin else None
     return {"ok": True, "mode": mode}
-
-
-# ---------------------------------------------------------- recordings
 
 
 def _rec_json(r):
@@ -274,8 +258,6 @@ async def list_recordings(
 ):
     """Users see only their own. Admins see all, optionally filtered by user.
     Both roles can filter by an inclusive date range (YYYY-MM-DD)."""
-    # A non-admin can never widen scope beyond their own recordings, no matter
-    # what user_id they pass - their own id is forced in.
     scope = user_id if user["role"] == "admin" else user["id"]
     rows = db.list_recordings(
         user_id=scope, date_from=date_from, date_to=date_to
@@ -347,7 +329,6 @@ async def transcribe_upload(
     suffix = os.path.splitext(file.filename)[1] or ".wav"
     path = None
     try:
-        # Write the upload to a temp file, enforcing size limits while streaming.
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             path = tmp.name
             size = 0
@@ -365,21 +346,17 @@ async def transcribe_upload(
                     )
                 tmp.write(chunk)
 
-        # Process the file in a background thread and map known upstream errors.
         try:
             turns = await asyncio.to_thread(sx.transcribe_file, path)
             return {"turns": turns}
         except TimeoutError as e:
-            # Upstream transcription timed out
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")
         except RuntimeError as e:
-            # Soniox reported an error or a network/runtime issue occurred
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Transcription service error: {e}")
         except Exception as e:
             log.exception("unexpected error during transcription: %s", e)
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal transcription error")
     finally:
-        # Always remove the temporary file if it was created.
         if path:
             try:
                 os.unlink(path)
@@ -387,7 +364,6 @@ async def transcribe_upload(
                 log.exception("could not delete temp upload %s", path)
 
 
-# ---- Transcribe + Translate endpoint ----
 @router.post("/api/transcribe/translate")
 async def transcribe_and_translate(
     request: Request,
@@ -413,7 +389,6 @@ async def transcribe_and_translate(
     suffix = os.path.splitext(file.filename)[1] or ".wav"
     path = None
     try:
-        # Stream upload to temp file, enforcing size limits.
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             path = tmp.name
             size = 0
@@ -430,7 +405,6 @@ async def transcribe_and_translate(
                     )
                 tmp.write(chunk)
 
-        # Call soniox_client to transcribe and (optionally) translate.
         try:
             turns = await asyncio.to_thread(sx.transcribe_file, path, target_language=target_language)
             return {"turns": turns}

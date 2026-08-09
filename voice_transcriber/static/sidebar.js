@@ -100,8 +100,6 @@
     if (el) sidebar.appendChild(el);
   }
 
-  // Reuses admin.html's own #tabRecs click handler (pane switch + data
-  // load) when already there, so this link never duplicates that logic.
   function allRecordingsLink() {
     const btn = document.createElement('button');
     btn.textContent = 'All Recordings';
@@ -116,9 +114,6 @@
     sidebar.appendChild(btn);
   }
 
-  // Fixed order, identical on every page: Admin console, All Recordings
-  // (admin role only), Recorder, Translate, Upload, then My recordings
-  // wherever it exists.
   if (me && me.role === 'admin') {
     navLink('Admin console', '/admin');
     allRecordingsLink();

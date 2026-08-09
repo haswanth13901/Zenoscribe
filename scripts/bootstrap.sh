@@ -4,8 +4,7 @@ set -euo pipefail
 echo "[bootstrap] Creating Python virtual environment in .venv"
 python -m venv .venv
 
-# Activate venv for the rest of the script (POSIX shells)
-# Note: running this script will activate the venv only for the script's shell.
+# Running this script only activates the venv for the script's own shell.
 # Users should `source .venv/bin/activate` to enter the environment interactively.
 . .venv/bin/activate
 
@@ -17,7 +16,6 @@ else
     echo "[bootstrap] WARNING: requirements.txt not found. Install dependencies manually."
 fi
 
-# Install Playwright browsers (useful for E2E tests)
 if python -m playwright --version > /dev/null 2>&1; then
     echo "[bootstrap] Installing Playwright browsers"
     python -m playwright install --with-deps || true
