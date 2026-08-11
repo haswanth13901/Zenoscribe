@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zenoscribe</title>
+<script src="/static/theme-toggle.js"></script>
 <style>
   :root {
     --bg: #0e0f13; --panel: #16181f; --line: #262932;
@@ -83,6 +84,7 @@
     font-size: 13px; color-scheme: dark; }
   .dfilters button { padding: 7px 12px; font-size: 13px; }
 </style>
+<link rel="stylesheet" href="/static/theme.css">
 </head>
 <body>
 
@@ -353,6 +355,12 @@ async function delRec(id) {
 }
 
 $('#histBtn').onclick = () => { $('#drawer').hidden = false; loadHistory(); };
+
+// Home page's "View all" link deep-links in via ?recordings=1 so it opens
+// straight into the drawer rather than requiring a second click.
+if (new URLSearchParams(location.search).get('recordings') === '1') {
+  $('#histBtn').click();
+}
 $('#dfrom').onchange = loadHistory;
 $('#dto').onchange = loadHistory;
 $('#dclear').onclick = () => {
@@ -375,5 +383,6 @@ $('#save').onclick = () => {
 <script src="/static/header.js"></script>
 <script src="/static/sidebar.js"></script>
 <script src="/static/upload.js"></script>
+<script src="/static/recorder-turns.js"></script>
 </body>
 </html>
