@@ -6,52 +6,97 @@
 <title>Sign in — Zenoscribe</title>
 <style>
   :root {
-    --bg:#0e0f13; --panel:#16181f; --line:#262932;
-    --text:#e6e8ee; --muted:#8b90a0; --accent:#6ea8fe; --err:#ef4444;
+    --navy:#0d1b2e; --navy-line:#1c2c44;
+    --muted-on-navy:#94a6c2; --dim-on-navy:#6d7f9c;
+    --accent:#1f5fd6; --accent-bright:#4f7fe8;
+    --bg:#f6f7f9; --panel:#ffffff; --line:#e3e7ee;
+    --text:#0f1e33; --muted:#8a94a4; --field-border:#d5dbe5;
+    --err-bg:#fdecea; --err:#b02f27;
   }
   *{box-sizing:border-box}
+  html,body{height:100%}
   body{
-    margin:0;background:var(--bg);color:var(--text);
-    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif;
-    min-height:100vh;display:grid;place-items:center;padding:20px;
+    margin:0;color:var(--text);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Helvetica Neue",sans-serif;
   }
-  .card{
-    width:100%;max-width:360px;background:var(--panel);
-    border:1px solid var(--line);border-radius:12px;padding:28px;
+  .split{min-height:100vh;display:flex}
+
+  /* ---- left: brand panel ---- */
+  .left{
+    flex:1 1 50%;background:var(--navy);color:#fff;
+    padding:40px 48px;display:flex;flex-direction:column;
   }
-  h1{font-size:18px;margin:0 0 4px}
-  .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
-  label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px}
+  .brand{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;letter-spacing:.14em}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent-bright);flex:none}
+  .hero{flex:1;display:flex;flex-direction:column;justify-content:center;max-width:440px}
+  .hero h1{font-size:34px;line-height:1.28;font-weight:700;margin:0 0 16px}
+  .hero p{font-size:14.5px;line-height:1.6;color:var(--muted-on-navy);margin:0}
+  .status{font-size:12.5px;color:var(--dim-on-navy)}
+
+  /* ---- right: form panel ---- */
+  .right{
+    flex:1 1 50%;background:var(--bg);
+    display:flex;align-items:center;justify-content:center;padding:24px;
+  }
+  .form-card{width:100%;max-width:380px}
+  .form-card h2{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13.5px;margin-bottom:26px}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:16px 0 6px}
   input{
-    width:100%;background:#0e0f13;border:1px solid var(--line);
-    color:var(--text);padding:10px 12px;border-radius:7px;
+    width:100%;background:var(--panel);border:1px solid var(--field-border);
+    color:var(--text);padding:11px 12px;border-radius:8px;
     font:inherit;font-size:14px;
   }
-  input:focus{outline:none;border-color:var(--accent)}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(31,95,214,.12)}
   button{
-    width:100%;margin-top:22px;background:var(--accent);color:#0b1220;
-    border:0;padding:11px;border-radius:7px;font:inherit;
-    font-weight:600;cursor:pointer;
+    width:100%;margin-top:24px;background:var(--accent);color:#fff;
+    border:0;padding:12px;border-radius:8px;font:inherit;
+    font-size:14.5px;font-weight:600;cursor:pointer;
   }
+  button:hover:not(:disabled){background:#1a52c0}
   button:disabled{opacity:.5;cursor:default}
   .err{
-    color:var(--err);font-size:13px;margin-top:14px;min-height:18px;
+    color:var(--err);background:var(--err-bg);font-size:13px;
+    margin-top:16px;padding:10px 12px;border-radius:8px;
+    display:none;
+  }
+  .err.show{display:block}
+
+  @media (max-width:860px){
+    .split{flex-direction:column}
+    .left{padding:32px}
+    .hero{max-width:none}
+    .hero h1{font-size:26px}
+    .status{margin-top:24px}
   }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>Zenoscribe</h1>
-  <div class="sub">Sign in to continue</div>
+<div class="split">
+  <div class="left">
+    <div class="brand"><span class="dot"></span><span>ZENOSCRIBE</span></div>
+    <div class="hero">
+      <h1>Every conversation, captured in the language each person needs.</h1>
+      <p>Sessions stay on your account. Audio and transcript download as WAV and TXT any time.</p>
+    </div>
+    <div class="status">Status: all systems operational</div>
+  </div>
 
-  <label for="u">Username</label>
-  <input id="u" autocomplete="username" autofocus>
+  <div class="right">
+    <div class="form-card">
+      <h2>Welcome back</h2>
+      <div class="sub">Sign in to continue</div>
 
-  <label for="p">Password</label>
-  <input id="p" type="password" autocomplete="current-password">
+      <label for="u">Username</label>
+      <input id="u" autocomplete="username" autofocus>
 
-  <button id="go">Sign in</button>
-  <div class="err" id="err"></div>
+      <label for="p">Password</label>
+      <input id="p" type="password" autocomplete="current-password">
+
+      <button id="go">Sign in</button>
+      <div class="err" id="err"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -60,10 +105,12 @@ const $ = s => document.querySelector(s);
 async function signIn() {
   const username = $('#u').value.trim();
   const password = $('#p').value;
-  if (!username || !password) { $('#err').textContent = 'Enter both fields.'; return; }
+  const err = $('#err');
+  if (!username || !password) { err.textContent = 'Enter both fields.'; err.classList.add('show'); return; }
 
   $('#go').disabled = true;
-  $('#err').textContent = '';
+  err.textContent = '';
+  err.classList.remove('show');
   try {
     const r = await fetch('/api/login', {
       method: 'POST',
@@ -75,9 +122,10 @@ async function signIn() {
 
     sessionStorage.setItem('token', data.token);
     sessionStorage.setItem('user', JSON.stringify(data.user));
-    location.href = data.user.role === 'admin' ? '/admin' : '/app';
+    location.href = '/home';
   } catch (e) {
-    $('#err').textContent = e.message;
+    err.textContent = e.message;
+    err.classList.add('show');
     $('#go').disabled = false;
   }
 }
