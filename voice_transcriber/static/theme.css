@@ -1,0 +1,153 @@
+/* Zenoscribe — theme. Light ("cool clinical") by default, dark via data-theme="dark".
+ * Add as the LAST element of <head> on every page:
+ *   <link rel="stylesheet" href="/static/theme.css">
+ * It only re-points colours and chrome; no ids, classes or JS behaviour change.
+ */
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --line: #e3e7ee;
+  --text: #0f1e33;
+  --muted: #8a94a4;
+  --accent: #1f5fd6;
+  --accent-soft: #eaf1fd;
+  --accent-ink: #ffffff;
+  --field-bg: #ffffff;
+  --field-border: #d5dbe5;
+  --hover: #fbfcfd;
+  --rowline: #eef1f5;
+  --rec: #d1372f;
+  --rec-soft: #fbeae8;
+  --ok: #2e7d5b;
+  --warn: #8a6a22;
+  --err: #b02f27;
+  --partial: #9aa4b3;
+  --src: #0f1e33;
+  --tgt: #1f5fd6;
+  --u1: #1f5fd6; --u2: #0f1e33; --u3: #5c6a7e; --u4: #7b5ea7;
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  --bg: #0e0f13;
+  --panel: #16181f;
+  --line: #262932;
+  --text: #e6e8ee;
+  --muted: #8b90a0;
+  --accent: #6ea8fe;
+  --accent-soft: #1b2740;
+  --accent-ink: #0b1220;
+  --field-bg: #0e0f13;
+  --field-border: #262932;
+  --hover: #1c1f28;
+  --rowline: rgba(255, 255, 255, .05);
+  --rec: #ef4444;
+  --rec-soft: #2c1618;
+  --ok: #7ddba3;
+  --warn: #f0a868;
+  --err: #ef4444;
+  --partial: #b9becd;
+  --src: #7ddba3;
+  --tgt: #6ea8fe;
+  --u1: #6ea8fe; --u2: #7ddba3; --u3: #f0a868; --u4: #d08fe0;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.55 system-ui, "Helvetica Neue", Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+header { background: var(--panel); }
+
+/* ---- buttons ---- */
+button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  font-weight: 500;
+}
+button:hover:not(:disabled) { background: var(--hover); }
+button.primary,
+.modes button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+button.rec { background: var(--rec); border-color: var(--rec); color: #fff; }
+button.danger { color: var(--err); border-color: var(--field-border); }
+
+/* ---- fields ---- */
+input, select,
+.dfilters input[type=date], .filters input[type=date] {
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  color: var(--text);
+  color-scheme: inherit;
+  border-radius: 7px;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+label { color: var(--muted); }
+
+/* ---- recorder transcript ---- */
+.turn { border-bottom: 1px solid var(--rowline); }
+.partial .body { color: var(--partial); }
+.who { color: var(--muted); }
+.ts, .empty { color: var(--muted); }
+
+/* ---- translate streams ---- */
+.stream { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.utt { border-bottom: 1px solid var(--rowline); }
+.spk { color: var(--accent); }
+.toggle { color: var(--muted); }
+
+/* ---- recordings drawer / cards ---- */
+#drawer { background: var(--panel); }
+.rec { border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.rec .meta { color: var(--muted); }
+
+/* ---- admin ---- */
+.panel { background: var(--panel); border: 1px solid var(--line); }
+th { color: var(--muted); border-bottom: 1px solid var(--line); }
+td { border-bottom: 1px solid var(--rowline); }
+tr:hover td { background: var(--hover); }
+h2 { color: var(--muted); }
+.tag { border: 1px solid var(--line); color: var(--muted); }
+.tag.admin { color: var(--warn); }
+.tag.on { color: var(--ok); }
+.dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.dot.off { background: var(--field-border); }
+.preview { color: var(--muted); }
+.msg.ok { color: var(--ok); }
+.msg.err { color: var(--err); }
+.tabs button { white-space: nowrap; }
+.tabs button.on {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  border-color: var(--line) !important;
+  border-bottom-color: var(--accent-soft) !important;
+  font-weight: 600;
+}
+
+/* ---- sidebar (sidebar.js injects rules that use the same vars) ---- */
+#appSidebar { background: var(--panel); }
+#appSidebar button:hover { background: var(--hover) !important; border-color: var(--line) !important; }
+#appSidebar button.active,
+#appSidebar button.on {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  border-color: var(--line) !important;
+}
+
+/* ---- theme toggle injected by theme-toggle.js ---- */
+#themeToggle { color: var(--text); }
+#themeToggle:hover { background: var(--hover); }
