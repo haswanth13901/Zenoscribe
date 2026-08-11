@@ -182,12 +182,21 @@ async def translate(client: WebSocket):
             # wins, so a stray mislabel on one token doesn't flip the label -
             # same approach the transcription engine uses.
             spk_votes = {}
+            # Same majority-vote approach for which language the current
+            # utterance is being spoken in, so the browser can label each
+            # turn (e.g. "Spanish") without re-deriving it from raw tokens.
+            lang_votes = {}
 
             def current_speaker():
                 if not spk_votes:
                     return None
                 sid = max(spk_votes, key=spk_votes.get)
                 return f"user-{sid}"
+
+            def current_language():
+                if not lang_votes:
+                    return None
+                return max(lang_votes, key=lang_votes.get)
 
             async def pump_stt():
                 async for raw in stt:
@@ -253,6 +262,11 @@ async def translate(client: WebSocket):
                                 src_partial += text
                                 if already_target:
                                     tgt_partial += text
+                            # This token's own language is the source's
+                            # spoken language (as opposed to translation
+                            # tokens, whose "language" is the target).
+                            if lang:
+                                lang_votes[lang] = lang_votes.get(lang, 0) + 1
 
                         last_token_at["t"] = loop.time()
                         last_speech_at["t"] = loop.time()
@@ -269,6 +283,7 @@ async def translate(client: WebSocket):
                         "source": (src_final["text"] + src_partial).strip(),
                         "translation": (tgt_final["text"] + tgt_partial).strip(),
                         "speaker": current_speaker() if diarize else None,
+                        "language": current_language(),
                     })
 
                     if endpoint:
@@ -276,10 +291,12 @@ async def translate(client: WebSocket):
                         await to_browser({
                             "type": "utterance_end",
                             "speaker": current_speaker() if diarize else None,
+                            "language": current_language(),
                         })
                         src_final["text"] = ""
                         tgt_final["text"] = ""
                         spk_votes.clear()
+                        lang_votes.clear()
 
                 # Stream closed: speak anything still buffered.
                 await speak_utterance()
@@ -377,6 +394,7 @@ async def _tts_utterance(text, language, voice, to_browser):
             await to_browser({
                 "type": "audio_start",
                 "sample_rate": sx.TTS_SAMPLE_RATE,
+                "language": language,
             })
 
             async for raw in tts:
