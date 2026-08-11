@@ -3,26 +3,28 @@
  * console, All Recordings, Recorder, Translate, Upload) plus one per-page
  * feature trigger (My recordings, relocated only where it exists).
  *
- * Included by index.html, admin.html and translate.html, after each host
- * page's own inline script has already wired up its buttons. This script:
+ * Included by index.html, admin.html, home.html and translate.html, after
+ * each host page's own inline script has already wired up its buttons. This
+ * script:
  *   1. Wraps the page's <main> in a flex row together with a new
  *      <nav id="appSidebar">, so the two sit side by side. Everything above
  *      that row (header, page-specific toolbars/tabs) is left untouched.
- *   2. Creates fresh nav links in a fixed order, identical on every page:
- *      Admin console and All Recordings (admin role only), Recorder,
- *      Translate, Upload. All Recordings deep-links into admin.html's
- *      existing Users/All Recordings tab switch (?tab=recordings) rather
- *      than duplicating that logic - see admin.html's own script.
+ *   2. Creates fresh nav links in a fixed order, grouped under "Workspace"
+ *      (Home, Recorder, Translate, Upload, My recordings) and, for admins
+ *      only, "Admin" (Admin console, All Recordings). All Recordings
+ *      deep-links into admin.html's existing Users/All Recordings tab switch
+ *      (?tab=recordings) rather than duplicating that logic - see
+ *      admin.html's own script.
  *   3. Relocates My recordings (histBtn) out of a hidden
  *      <div id="featureStaging"> into the sidebar, keeping whatever click
  *      handler the host page already attached to it - only its DOM parent
  *      changes. Pages without it simply don't get that entry.
- *   4. Adds a hamburger toggle for the sidebar inside its own thin strip
- *      (#sidebarBar), inserted directly above the sidebar+main row - below
- *      the header and below any page-specific bar (admin's tabs, translate's
- *      controls). This script never touches #appHeader or header.js's
- *      elements in any way. The toggle slides right to track the sidebar's
- *      edge when expanded, and back to the left edge when collapsed.
+ *   4. Adds a collapse toggle: a panel icon that visually sits next to the
+ *      "Workspace" label. It's a sibling of #appSidebar inside #appLayout,
+ *      absolutely positioned rather than a normal child of the sidebar, so
+ *      it stays in place and clickable even after the sidebar collapses to
+ *      zero width - collapsing only hides the "Workspace" text it lines up
+ *      with, never the icon itself.
  */
 (function initSidebar() {
   const main = document.querySelector('main');
@@ -33,7 +35,7 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    #appLayout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+    #appLayout { display: flex; flex: 1; min-height: 0; overflow: hidden; position: relative; }
     #appSidebar {
       flex: 0 0 190px; width: 190px; background: var(--panel);
       border-right: 1px solid var(--line); padding: 14px 10px;
@@ -48,35 +50,31 @@
     }
     #appSidebar button {
       display: block; width: 100%; text-align: left; background: transparent;
-      border: 1px solid transparent; padding: 9px 12px; border-radius: 7px;
+      border: 1px solid transparent; padding: 10px 14px; border-radius: 10px;
       font: inherit; font-size: 14px; color: var(--text); cursor: pointer;
     }
     #appSidebar button:hover { background: var(--bg); border-color: var(--line); }
     #appSidebar button.active, #appSidebar button.on {
-      background: var(--accent, #6ea8fe); color: #0b1220;
-      font-weight: 600; border-color: var(--accent, #6ea8fe);
+      background: var(--accent-soft); color: var(--accent);
+      font-weight: 700; border-color: var(--accent-soft);
     }
-    #sidebarBar {
-      padding: 8px 20px; display: flex; align-items: center; position: relative;
+    #appSidebar .navGroup {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .6px;
+      text-transform: uppercase; color: var(--muted); padding: 12px 12px 4px 34px;
     }
+    #appSidebar .navGroup:first-child { padding-top: 4px; }
+
+    #appMainCol { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+
     #sidebarToggle {
-      position: relative; left: 135px; padding: 8px 10px;
-      font-size: 15px; line-height: 1;
-      transition: left .15s ease;
+      position: absolute; top: 15px; left: 14px; z-index: 5;
+      width: 20px; height: 20px; padding: 0; display: flex;
+      align-items: center; justify-content: center; background: transparent;
+      border: 0; border-radius: 5px; color: var(--muted); cursor: pointer;
     }
-    #sidebarToggle.collapsed { left: 0; }
+    #sidebarToggle:hover { background: var(--hover); color: var(--text); }
   `;
   document.head.appendChild(style);
-
-  const bar = document.createElement('div');
-  bar.id = 'sidebarBar';
-  main.parentNode.insertBefore(bar, main);
-
-  const toggle = document.createElement('button');
-  toggle.id = 'sidebarToggle';
-  toggle.textContent = '☰';
-  toggle.title = 'Toggle sidebar';
-  bar.appendChild(toggle);
 
   const layout = document.createElement('div');
   layout.id = 'appLayout';
@@ -85,7 +83,40 @@
   const sidebar = document.createElement('nav');
   sidebar.id = 'appSidebar';
   layout.appendChild(sidebar);
-  layout.appendChild(main);
+
+  // Any page-specific toolbar sitting between the header and <main> (e.g.
+  // Translate's .controls, Admin's .tabs) belongs in the same scrolling
+  // column as main, so the sidebar spans the full height beside both -
+  // instead of the toolbar spanning full width above the whole layout and
+  // pushing the sidebar down below it.
+  const header = document.getElementById('appHeader');
+  const mainCol = document.createElement('div');
+  mainCol.id = 'appMainCol';
+  if (header) {
+    let n = header.nextElementSibling;
+    while (n && n !== layout) {
+      const next = n.nextElementSibling;
+      mainCol.appendChild(n);
+      n = next;
+    }
+  }
+  mainCol.appendChild(main);
+  layout.appendChild(mainCol);
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.id = 'sidebarToggle';
+  toggleBtn.type = 'button';
+  toggleBtn.title = 'Toggle sidebar';
+  toggleBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>';
+  toggleBtn.onclick = () => { sidebar.classList.toggle('collapsed'); };
+  layout.appendChild(toggleBtn);
+
+  function groupLabel(text) {
+    const label = document.createElement('div');
+    label.className = 'navGroup';
+    label.textContent = text;
+    sidebar.appendChild(label);
+  }
 
   function navLink(label, href) {
     const btn = document.createElement('button');
@@ -95,9 +126,14 @@
     sidebar.appendChild(btn);
   }
 
-  function relocate(id) {
+  // Pages that own the feature (index.html, admin.html) already render the
+  // trigger button; relocate it in place so its click handler survives.
+  // Pages that don't (home.html, translate.html) get a plain link to the
+  // feature's home on /app instead, so the nav stays identical everywhere.
+  function relocateOrLink(id, label, href) {
     const el = document.getElementById(id);
     if (el) sidebar.appendChild(el);
+    else navLink(label, href);
   }
 
   function allRecordingsLink() {
@@ -114,20 +150,19 @@
     sidebar.appendChild(btn);
   }
 
+  groupLabel('Workspace');
+  navLink('Home', '/home');
+  navLink('Recorder', '/app');
+  navLink('Translate', '/translate');
+  relocateOrLink('uploadBtn', 'Upload', '/app');
+  relocateOrLink('histBtn', 'My recordings', '/app?recordings=1');
+
   if (me && me.role === 'admin') {
+    groupLabel('Admin');
     navLink('Admin console', '/admin');
     allRecordingsLink();
   }
-  navLink('Recorder', '/app');
-  navLink('Translate', '/translate');
-  relocate('uploadBtn');
-  relocate('histBtn');
 
   const staging = document.getElementById('featureStaging');
   if (staging) staging.remove();
-
-  toggle.onclick = () => {
-    const collapsed = sidebar.classList.toggle('collapsed');
-    toggle.classList.toggle('collapsed', collapsed);
-  };
 })();

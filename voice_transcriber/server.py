@@ -68,6 +68,12 @@ async def login_page():
     return FileResponse(f"{config.STATIC_DIR}/login.html")
 
 
+@app.get("/home")
+@app.get("/home/")
+async def home_page():
+    return FileResponse(f"{config.STATIC_DIR}/home.html")
+
+
 @app.get("/app")
 @app.get("/app/")
 async def app_page():

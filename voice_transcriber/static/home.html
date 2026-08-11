@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home — Zenoscribe</title>
+<script src="/static/theme-toggle.js"></script>
+<style>
+  :root {
+    --bg:#0e0f13; --panel:#16181f; --line:#262932;
+    --text:#e6e8ee; --muted:#8b90a0; --accent:#6ea8fe;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; }
+  .spacer { flex: 1; }
+  .who { font-size: 13px; color: var(--muted); }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    padding: 8px 16px; border-radius: 7px; font: inherit; font-size: 14px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: #3a3f4d; }
+
+  main { flex: 1; overflow-y: auto; padding: 26px 28px 40px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  .greet { margin: 4px 0 26px; }
+  .greet h1 { display: inline; font-size: 22px; font-weight: 700; margin: 0; }
+  .greet .date { color: var(--muted); font-size: 14.5px; margin-left: 10px; }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 30px; }
+  .card { border-radius: 12px; padding: 22px; border: 1px solid var(--line); }
+  .card.primary { background: #0d1b2e; border-color: #0d1b2e; color: #fff; }
+  .card.primary p { color: #a9b6cc; }
+  .card h2 { font-size: 15.5px; font-weight: 700; margin: 0 0 6px; }
+  .card p { font-size: 13.5px; color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
+  .card.primary button { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
+  .card.secondary { background: var(--panel); }
+
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .sec-head h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 0; font-weight: 700; }
+  .sec-head a { font-size: 13px; color: var(--accent); cursor: pointer; text-decoration: none; }
+  .sec-head a:hover { text-decoration: underline; }
+
+  .sessions { border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    margin-bottom: 32px; overflow: hidden; }
+  .srow { display: flex; align-items: center; gap: 14px; padding: 13px 16px;
+    border-bottom: 1px solid rgba(255,255,255,.05); }
+  .srow:last-child { border-bottom: 0; }
+  .srow .title { flex: 1; min-width: 0; font-weight: 600; font-size: 14px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .srow .col { color: var(--muted); font-size: 13px; white-space: nowrap; min-width: 84px; text-align: right; }
+  .empty { color: var(--muted); text-align: center; padding: 36px 0; font-size: 14px; }
+
+  .stats { display: flex; gap: 44px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--line); }
+  .stat .num { font-size: 22px; font-weight: 700; }
+  .stat .label { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
+</style>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+
+<header id="appHeader">
+  <span class="spacer"></span>
+  <span class="who" id="who"></span>
+</header>
+
+<main>
+<div class="wrap">
+
+  <div class="greet">
+    <h1 id="greeting"></h1>
+    <span class="date" id="today"></span>
+  </div>
+
+  <div class="cards">
+    <div class="card primary">
+      <h2>Start recording</h2>
+      <p>Live transcription with speakers separated as they talk.</p>
+      <button id="goRecord">Start</button>
+    </div>
+    <div class="card secondary">
+      <h2>Live translate</h2>
+      <p>Two-way, spoken back in the other language.</p>
+      <button id="goTranslate">Open</button>
+    </div>
+  </div>
+
+  <div class="sec-head">
+    <h2>Recent sessions</h2>
+    <a id="viewAll">View all</a>
+  </div>
+  <div class="sessions" id="sessions">
+    <div class="empty">Loading...</div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+</div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const token = sessionStorage.getItem('token');
+const me = JSON.parse(sessionStorage.getItem('user') || 'null');
+if (!token || !me) {
+  location.replace('/login');
+  throw new Error('redirecting to login');
+}
+$('#who').textContent = me.username;
+
+async function api(path) {
+  const r = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
+  if (r.status === 401) { sessionStorage.clear(); location.href = '/login'; return; }
+  const d = await r.json();
+  if (!r.ok) throw new Error((d && d.detail) || 'Request failed');
+  return d;
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const fmtDur = s => { s = Math.round(s || 0);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (sameDay) return `Today ${time}`;
+  const diffDays = Math.round((now.setHours(0,0,0,0) - new Date(d).setHours(0,0,0,0)) / 86400000);
+  if (diffDays >= 0 && diffDays < 6) {
+    return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+  }
+  return `${d.toLocaleDateString([], { day: '2-digit', month: 'short' })} ${time}`;
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  const part = h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening';
+  const name = me.full_name || me.username;
+  return `Good ${part}, ${name}`;
+}
+
+$('#greeting').textContent = greeting();
+{
+  const d = new Date();
+  const weekday = d.toLocaleDateString('en-US', { weekday: 'long' });
+  const day = d.getDate();
+  const month = d.toLocaleDateString('en-US', { month: 'long' });
+  $('#today').textContent = `${weekday}, ${day} ${month}`;
+}
+
+$('#goRecord').onclick = () => { location.href = '/app'; };
+$('#goTranslate').onclick = () => { location.href = '/translate'; };
+$('#viewAll').onclick = () => { location.href = '/app?recordings=1'; };
+
+async function load() {
+  try {
+    const rows = await api(`/api/recordings?user_id=${encodeURIComponent(me.id)}`);
+
+    const list = $('#sessions');
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty">No recordings yet. Press Start to make your first one.</div>';
+    } else {
+      list.innerHTML = rows.slice(0, 4).map(r => `
+        <div class="srow">
+          <div class="title">${esc(r.preview) || '(no speech detected)'}</div>
+          <div class="col">${fmtWhen(r.started_at)}</div>
+          <div class="col">${fmtDur(r.duration)}</div>
+          <div class="col">${r.turn_count} turns</div>
+        </div>`).join('');
+    }
+
+    const now = new Date();
+    const monthSecs = rows
+      .filter(r => { const d = new Date(r.started_at);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); })
+      .reduce((sum, r) => sum + (r.duration || 0), 0);
+    const mins = Math.round(monthSecs / 60);
+
+    $('#stats').innerHTML = `
+      <div class="stat"><div class="num">${Math.floor(mins / 60)}h ${mins % 60}m</div>
+        <div class="label">transcribed this month</div></div>
+      <div class="stat"><div class="num">${rows.length}</div>
+        <div class="label">sessions saved</div></div>`;
+  } catch (e) {
+    $('#sessions').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+load();
+</script>
+<script src="/static/header.js"></script>
+<script src="/static/sidebar.js"></script>
+</body>
+</html>
