@@ -1,3 +1,12 @@
+# ---- Stage 1: build the React /home bundle (frontend/) ----
+FROM node:20-slim AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---- Stage 2: application image ----
 # Lightweight image for local development/testing
 FROM python:3.12-slim
 
@@ -16,6 +25,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     if [ -f /app/requirements.txt ]; then pip install --no-cache-dir -r /app/requirements.txt; fi
 
 COPY . /app
+COPY --from=frontend-build /app/frontend/dist /app/voice_transcriber/static/spa_dist
 
 EXPOSE 8000
 

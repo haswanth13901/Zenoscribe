@@ -2,13 +2,21 @@
 
 Starts a real uvicorn subprocess with test hooks enabled (via the
 live_server fixture), uses the admin-only test hook to toggle fake transcribe
-modes (timeout/runtime), and asserts the client-side alert() behavior when
-uploading through the real UI.
+modes (timeout/runtime), and asserts the upload panel's inline error text
+for each.
 
-This is the one test in the suite that genuinely needs a live server and a
-real browser - everything else in the fast suite goes through TestClient
-in-process instead. See pytest.ini: marked `integration`, excluded from a
-bare `pytest` run by default.
+Previously drove upload.js's vanilla #uploadBtn UI on /app and asserted
+window.alert() calls. /app is now the React recorder (see
+test_e2e_playwright_app_page.py); its ported UploadPanel (opened via
+?upload=1) shows the same diagnostic info (status + server detail) inline
+instead of via alert() - see UploadPanel.tsx's formatUploadError(). This
+test was rewritten in place rather than left targeting a page that no
+longer has the elements it drove.
+
+This is one of the few tests in the suite that genuinely needs a live
+server and a real browser - everything else in the fast suite goes through
+TestClient in-process instead. See pytest.ini: marked `integration`,
+excluded from a bare `pytest` run by default.
 """
 import json as _json
 import time
@@ -18,7 +26,7 @@ import requests
 
 
 @pytest.mark.integration
-def test_e2e_playwright_upload_alert(live_server, make_wav, tmp_path):
+def test_e2e_playwright_upload_inline_error(live_server, make_wav, tmp_path):
     from playwright.sync_api import sync_playwright
 
     wav_path = make_wav(path=tmp_path / "e2e_test.wav")
@@ -41,45 +49,49 @@ def test_e2e_playwright_upload_alert(live_server, make_wav, tmp_path):
 
     def init_script():
         return (
-            f"window.__E2E_TOKEN = {_json.dumps(token)}; window.__E2E_USER = {_json.dumps(user_obj)}; "
-            "sessionStorage.setItem('token', window.__E2E_TOKEN); "
-            "sessionStorage.setItem('user', JSON.stringify(window.__E2E_USER));"
-            "window.__E2E_ALERTS = []; window.alert = function(m){ window.__E2E_ALERTS.push(String(m)); };"
+            f"sessionStorage.setItem('token', {_json.dumps(token)}); "
+            f"sessionStorage.setItem('user', {_json.dumps(_json.dumps(user_obj))});"
         )
 
-    def upload_and_get_alert(browser):
+    def upload_and_get_error(browser):
         context = browser.new_context()
         context.add_init_script(init_script())
         page = context.new_page()
-        page.goto(live_server.base_url + "/app")
+        page.goto(live_server.base_url + "/app?upload=1")
 
-        page.click("#uploadBtn")
-        page.set_input_files("#uploadInput", str(wav_path))
-        page.click("#doTranscribe")
+        # The file input is deliberately hidden (triggered indirectly via
+        # the "Choose file" button) - wait for it to be attached, not
+        # visible, and set_input_files works on a hidden input directly.
+        page.wait_for_selector('[data-testid="upload-file-input"]', state="attached", timeout=10000)
+        page.set_input_files('[data-testid="upload-file-input"]', str(wav_path))
+        # "text=Transcribe" would also match the "Transcribe a file" heading
+        # and the "Transcribe & Translate" button (substring match) - an
+        # exact role/name query is unambiguous.
+        page.get_by_role("button", name="Transcribe", exact=True).click()
 
-        alert_msg = None
+        error_text = None
         for _ in range(40):
-            alerts = page.evaluate("() => window.__E2E_ALERTS.slice()")
-            if alerts:
-                alert_msg = alerts[-1]
+            el = page.query_selector('[data-testid="upload-transcribe-error"]')
+            if el:
+                error_text = el.inner_text()
                 break
             time.sleep(0.2)
         context.close()
-        return alert_msg
+        return error_text
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
 
         set_fake_mode("timeout")
-        alert_msg = upload_and_get_alert(browser)
-        assert alert_msg, "no alert recorded for timeout case"
-        assert "504" in alert_msg or "timed out" in alert_msg, f"unexpected alert for timeout: {alert_msg}"
+        error_text = upload_and_get_error(browser)
+        assert error_text, "no inline error rendered for the timeout case"
+        assert "504" in error_text or "timed out" in error_text, f"unexpected error for timeout: {error_text}"
 
         set_fake_mode("runtime")
-        alert_msg = upload_and_get_alert(browser)
-        assert alert_msg, "no alert recorded for runtime error case"
-        assert "502" in alert_msg or "runtime" in alert_msg or "Bad Gateway" in alert_msg, (
-            f"unexpected alert for runtime error: {alert_msg}"
+        error_text = upload_and_get_error(browser)
+        assert error_text, "no inline error rendered for the runtime error case"
+        assert "502" in error_text or "runtime" in error_text or "service error" in error_text, (
+            f"unexpected error for runtime error: {error_text}"
         )
 
         set_fake_mode("ok")

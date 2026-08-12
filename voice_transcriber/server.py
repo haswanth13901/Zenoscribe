@@ -71,29 +71,37 @@ async def login_page():
 @app.get("/home")
 @app.get("/home/")
 async def home_page():
-    return FileResponse(f"{config.STATIC_DIR}/home.html")
+    # /home and /app are both client-side routes of the one React SPA built
+    # by frontend/ into static/spa_dist/ - see the repo README's "Frontend"
+    # section to build it. More routes join this same shell as more pages
+    # migrate (admin, translate).
+    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
 
 
 @app.get("/app")
 @app.get("/app/")
 async def app_page():
-    # The page itself is public; its JS redirects without a token and every
-    # API call behind it is authenticated server-side. Both the bare and
-    # trailing-slash forms are served directly so a stray slash doesn't cause
-    # a 307 redirect that can compound with the client-side auth redirect.
-    return FileResponse(f"{config.STATIC_DIR}/index.html")
+    # Same built SPA shell as /home (see above); react-router decides what
+    # renders client-side. Both the bare and trailing-slash forms are served
+    # directly so a stray slash doesn't cause a 307 redirect.
+    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
 
 
 @app.get("/admin")
 @app.get("/admin/")
 async def admin_page():
-    return FileResponse(f"{config.STATIC_DIR}/admin.html")
+    # Same built SPA shell as /home and /app; react-router decides what
+    # renders client-side (and gates it to admins - see RequireAuth's
+    # adminOnly prop in frontend/).
+    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
 
 
 @app.get("/translate")
 @app.get("/translate/")
 async def translate_page():
-    return FileResponse(f"{config.STATIC_DIR}/translate.html")
+    # Same built SPA shell as /home, /app and /admin; react-router decides
+    # what renders client-side.
+    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
 
 
 @app.get("/api/languages")

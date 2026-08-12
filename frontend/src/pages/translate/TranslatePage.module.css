@@ -1,0 +1,130 @@
+.toolbar {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.status {
+  font-size: 13px;
+  color: var(--muted);
+  margin-right: auto;
+}
+
+.statusLive::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--rec);
+  border-radius: 50%;
+  margin-right: 7px;
+  animation: pulse 1.4s infinite;
+}
+
+.statusError {
+  color: var(--err);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.toggleBtn.rec {
+  background: var(--rec);
+  border-color: var(--rec);
+  color: #fff;
+}
+
+.controls {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.row1,
+.row2 {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.row2 {
+  align-items: center;
+}
+
+.field label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.field select {
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  color: var(--text);
+  padding: 9px 11px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 14px;
+  min-width: 150px;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 5px;
+  max-width: 200px;
+}
+
+.modes {
+  display: flex;
+  gap: 6px;
+}
+
+.modes button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.toggleField {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.viewSwitch {
+  display: flex;
+  gap: 6px;
+}
+
+.viewSwitch button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px;
+}

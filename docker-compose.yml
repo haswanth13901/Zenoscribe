@@ -1,3 +1,9 @@
+# NOTE: the `volumes` bind-mount below shadows the image's baked-in
+# voice_transcriber/static/home_dist/ (built by the frontend-build stage in
+# Dockerfile) with whatever is on the host at that path. Before `docker
+# compose up`, run `npm --prefix frontend run build` on the host (or
+# `docker compose run --rm web npm --prefix frontend run build`) so /home
+# serves a real build instead of a missing/stale one.
 services:
   web:
     build: .

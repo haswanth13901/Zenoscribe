@@ -159,6 +159,14 @@ def live_server(tmp_path, monkeypatch):
     env["ALLOW_TEST_HOOKS"] = "true"
     env["TEST_HOOK_SECRET"] = hook_secret
     env["PYTHONPATH"] = str(REPO_ROOT)
+    # Force an invalid Soniox key regardless of what the developer's own
+    # .env has configured (os.environ.copy() would otherwise inherit a real
+    # one). No `integration`-marked test should depend on - or spend quota
+    # against - the real Soniox API; that's what the separately-gated
+    # `real_network` marker (RUN_REAL_SONIOX_TESTS=true) is for. Tests that
+    # need Soniox behavior without a real key use the ALLOW_TEST_HOOKS fake
+    # mode above instead.
+    env["SONIOX_API_KEY"] = "test-invalid-soniox-key"
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "voice_transcriber.server:app",
@@ -181,3 +189,43 @@ def live_server(tmp_path, monkeypatch):
     finally:
         proc.kill()
         proc.wait(timeout=10)
+
+
+# ---------------------------------------------------- Playwright e2e helpers
+
+def seed_auth_script(token, user):
+    """JS to seed sessionStorage before a page's own script runs, via
+    BrowserContext.add_init_script - the same auth handoff every
+    test_e2e_playwright_*.py file needs.
+    """
+    import json as _json
+
+    return (
+        f"sessionStorage.setItem('token', {_json.dumps(token)}); "
+        f"sessionStorage.setItem('user', {_json.dumps(_json.dumps(user))});"
+    )
+
+
+def best_effort_unlink(paths, attempts=40, delay_sec=0.3):
+    """Retries deletion for a bit, since a live_server-backed test may be
+    racing the server's own async cleanup of a file it just wrote (e.g. the
+    recorder's WAV writer) - on Windows an open file handle blocks deletion
+    outright (PermissionError), so an immediate unlink can fire before the
+    server finishes tearing a session down. Best-effort: never fails the
+    test, just tries hard not to leave debris in the real (non-isolated)
+    recordings/ dir (config.RECORDINGS isn't overridden for live_server,
+    since a separate subprocess can't see this process's monkeypatches).
+    """
+    remaining = set(paths)
+    for _ in range(attempts):
+        if not remaining:
+            return
+        still_locked = set()
+        for f in remaining:
+            try:
+                f.unlink(missing_ok=True)
+            except PermissionError:
+                still_locked.add(f)
+        remaining = still_locked
+        if remaining:
+            time.sleep(delay_sec)

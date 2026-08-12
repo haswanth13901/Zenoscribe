@@ -1,0 +1,71 @@
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.heading {
+  font-size: 13px;
+  margin: 0 0 14px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.grid label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+
+.grid input,
+.grid select {
+  width: 100%;
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  color: var(--text);
+  padding: 9px 11px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.grid input:focus,
+.grid select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.actions {
+  margin-top: 14px;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.msg {
+  margin-top: 12px;
+  font-size: 13px;
+  min-height: 18px;
+}
+
+.msgOk {
+  color: var(--ok);
+}
+
+.msgErr {
+  color: var(--err);
+}

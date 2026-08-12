@@ -233,6 +233,65 @@ docker-compose up --build
 These quickchecks are intended for development and CI; do not enable debug
 logging or test hooks in production. See the Production section above for
 secure deployment requirements.
+
+## Frontend (React + Redux Toolkit)
+
+All four post-login pages — `/home`, `/app` (the recorder), `/admin` and
+`/translate` — are migrated off vanilla JS, completing the staged plan in
+`Update_Roadmap.txt` (`/home` → recorder → admin → translate). All four are
+client-side routes of one SPA in `frontend/` (Vite + React + TypeScript +
+Redux Toolkit/RTK Query), built into `voice_transcriber/static/spa_dist/`,
+which `server.py` serves for all four routes — react-router decides what
+renders (and gates `/admin` to admins client-side via `RequireAuth`'s
+`adminOnly` prop). `login.html` is untouched and still served the old way
+(pre-auth, no reason to migrate). The old vanilla `home.html`/`index.html`/
+`admin.html`/`translate.html` and the shared scripts they used
+(`header.js`/`sidebar.js`/`theme-toggle.js`/`upload.js`/`recorder-turns.js`/
+`translate-views.js`) were kept as a rollback path through the migration
+and have since been deleted, now that the SPA is confirmed stable — restore
+them from git history (`git log -- voice_transcriber/static/`) if ever
+needed.
+
+Dev (two terminals, from the repo root):
+
+```bash
+uvicorn voice_transcriber.server:app --reload --port 8000
+npm --prefix frontend install   # first time only
+npm --prefix frontend run dev
+```
+
+Open http://localhost:5173/home (or `/app`, `/admin`, `/translate`). The
+Vite dev server proxies everything it doesn't own (`/api`, `/ws`, `/login`,
+`/static`) to the FastAPI server on `:8000` — all four SPA routes are
+handled by Vite itself rather than proxied — so logging in through the real
+`/login` page and being redirected to `/home` works exactly as it will in
+production, and the recorder's and translate page's live WebSockets connect
+correctly under `npm run dev` too.
+
+Build (required before any of the four routes serve anything outside `npm run dev`):
+
+```bash
+npm --prefix frontend run build
+```
+
+This writes to `frontend/dist/`, which is copied into
+`voice_transcriber/static/spa_dist/` by the `Dockerfile`'s build stage. For
+a non-Docker run, copy it yourself after building:
+
+```bash
+# POSIX
+cp -r frontend/dist/* voice_transcriber/static/spa_dist/
+
+# Windows PowerShell
+Copy-Item -Recurse -Force frontend/dist/* voice_transcriber/static/spa_dist/
+```
+
+Frontend tests:
+
+```bash
+npm --prefix frontend run test
+```
+
 ## Project structure
 
 ```
@@ -244,14 +303,12 @@ auth.py           JWT, bcrypt, role guards
 db.py             SQLite storage (users, recordings, presence)
 soniox_client.py  Soniox REST + WebSocket config, speaker labeling
 static/
-  login.html      Sign-in page
-  index.html      Recorder + history drawer
-  admin.html      Admin console
-  translate.html  Live speech-to-speech translation
-  header.js       Shared header: home button + sign out (all authenticated pages)
-  sidebar.js      Shared left-hand nav: Record, Upload, Translate, My recordings, Admin console
-  upload.js       Shared file-upload transcription feature (index.html, admin.html)
-  pcm-worklet.js  Browser mic -> 16 kHz PCM
+  login.html        Sign-in page - the only page still served the old way
+  theme-preboot.js    Pre-paint dark-mode flip only, used by spa_dist/index.html
+  pcm-worklet.js      Browser mic -> 16 kHz PCM - loaded directly by the
+                      React recorder and translate pages
+  spa_dist/          Built output of frontend/ (gitignored, see "Frontend" above)
+frontend/          React + Redux Toolkit source for all four pages (Vite + TypeScript)
 ```
 
 The two routers (`routes_api`, `transcribe`) never import each other — both
@@ -315,12 +372,13 @@ Neither is committed to git (see `.gitignore`).
 
 - Login issues a JWT stored in the browser's `sessionStorage`, so closing the
   tab clears the session.
-- Every protected page (`/app`, `/admin`, `/translate`) checks `sessionStorage`
-  for a token and user on load and redirects to `/login` immediately if either
-  is missing — the page itself is not gated server-side, but every API call
-  behind it is. A token that's present but stale/expired/invalid is only
-  caught on the first authenticated request: the shared `api()`/fetch wrapper
-  on each page clears storage and redirects to `/login` on a `401`.
+- Every protected page (`/app`, `/admin`, `/translate`, `/home`) checks
+  `sessionStorage` for a token and user on load and redirects to `/login`
+  immediately if either is missing — the page itself is not gated
+  server-side, but every API call behind it is. A token that's present but
+  stale/expired/invalid is only caught on the first authenticated request:
+  the shared `api()`/fetch wrapper on each page (an RTK Query base query on
+  `/home`) clears storage and redirects to `/login` on a `401`.
 - Tokens expire after `TOKEN_HOURS` (default 8). Expiry is baked into each
   token, so a continuously running server does not keep anyone logged in past
   their window — the next request after expiry returns 401 and the page

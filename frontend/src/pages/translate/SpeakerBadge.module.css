@@ -1,0 +1,37 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.avatar {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--muted);
+}
+
+.avatar[data-color="1"] {
+  background: var(--u1);
+}
+.avatar[data-color="2"] {
+  background: var(--u2);
+}
+.avatar[data-color="3"] {
+  background: var(--u3);
+}
+.avatar[data-color="4"] {
+  background: var(--u4);
+}
+
+.name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}

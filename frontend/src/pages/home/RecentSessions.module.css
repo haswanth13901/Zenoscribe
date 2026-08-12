@@ -1,0 +1,62 @@
+.sessions {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  margin-bottom: 32px;
+  overflow: hidden;
+}
+
+.srow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--rowline, rgba(0, 0, 0, 0.05));
+}
+
+.srow:last-child {
+  border-bottom: 0;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  min-width: 84px;
+  text-align: right;
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 36px 0;
+  font-size: 14px;
+}
+
+.errorState {
+  composes: empty;
+  color: var(--err);
+}
+
+.retryBtn {
+  display: block;
+  margin: 10px auto 0;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 6px 14px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}

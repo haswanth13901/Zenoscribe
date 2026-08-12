@@ -1,0 +1,106 @@
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+}
+
+.heading {
+  font-size: 13px;
+  margin: 0 0 14px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+
+td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--rowline, rgba(0, 0, 0, 0.04));
+  vertical-align: middle;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+.subtext {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+}
+
+.tagAdmin {
+  color: var(--warn);
+}
+
+.tagOn {
+  color: var(--ok);
+}
+
+.tagOff {
+  color: var(--muted);
+}
+
+.rowActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.danger {
+  color: var(--err);
+}
+
+.actionError {
+  color: var(--err);
+  font-size: 12px;
+}
+
+.actionOk {
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.loading {
+  color: var(--muted);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.errorState {
+  color: var(--err);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.retryBtn {
+  display: block;
+  margin: 10px auto 0;
+}
