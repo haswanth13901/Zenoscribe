@@ -8,7 +8,6 @@ export interface MonthlyStats {
   sessionCount: number;
 }
 
-// Ported 1:1 from home.html's inline stats calculation in load().
 export function computeMonthlyStats(recordings: Recording[], now: Date): MonthlyStats {
   const monthSeconds = recordings
     .filter((r) => {

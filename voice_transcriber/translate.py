@@ -60,11 +60,10 @@ async def translate(client: WebSocket):
         await client.close(code=4401)
         return
 
-    # ---- read + validate settings from the hello frame ----
     mode = hello.get("mode", "one_way")
     speak = bool(hello.get("speak", True))
     voice = hello.get("voice", "Maya")
-    diarize = bool(hello.get("diarize", False))    # label who said what
+    diarize = bool(hello.get("diarize", False))
 
     if mode == "one_way":
         target = hello.get("target_language", "es")
@@ -117,7 +116,6 @@ async def translate(client: WebSocket):
             log.info("translate session for %s: mode=%s speak=%s",
                      ws_user["username"], mode, speak)
 
-            # ---- browser mic -> STT ----
             async def pump_mic():
                 nonlocal alive
                 try:
@@ -139,7 +137,6 @@ async def translate(client: WebSocket):
                     except Exception:
                         pass
 
-            # ---- STT results -> browser captions + TTS ----
             # Translation tokens are accumulated per utterance and spoken when
             # the utterance closes (endpoint token), so TTS gets whole phrases.
             pending_speech = {"text": "", "lang": None}

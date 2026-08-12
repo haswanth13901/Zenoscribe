@@ -114,8 +114,6 @@ def reset_soniox_fake_mode():
     soniox_client.set_test_fake_mode(None)
 
 
-# --------------------------------------------------------------- live_server
-
 @dataclass
 class LiveServer:
     base_url: str
@@ -190,8 +188,6 @@ def live_server(tmp_path, monkeypatch):
         proc.kill()
         proc.wait(timeout=10)
 
-
-# ---------------------------------------------------- Playwright e2e helpers
 
 def seed_auth_script(token, user):
     """JS to seed sessionStorage before a page's own script runs, via

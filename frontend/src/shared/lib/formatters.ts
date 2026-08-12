@@ -1,5 +1,3 @@
-// Ported 1:1 from home.html's inline fmtDur/fmtWhen.
-
 export function fmtDur(seconds: number | null | undefined): string {
   const s = Math.round(seconds || 0);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;

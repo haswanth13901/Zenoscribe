@@ -30,7 +30,7 @@ function localeTime(d: Date): string {
 }
 
 describe("fmtWhen", () => {
-  const now = new Date(2026, 5, 15, 14, 30); // some fixed reference date
+  const now = new Date(2026, 5, 15, 14, 30);
 
   it("returns 'Today HH:MM' for a same-day timestamp", () => {
     const sameDay = new Date(2026, 5, 15, 9, 5);
