@@ -4,11 +4,13 @@ on:
   push:
     paths:
       - 'voice_transcriber/**'
+      - 'frontend/**'
       - '.github/workflows/playwright-e2e.yml'
       - 'requirements.txt'
   pull_request:
     paths:
       - 'voice_transcriber/**'
+      - 'frontend/**'
       - '.github/workflows/playwright-e2e.yml'
       - 'requirements.txt'
 
@@ -42,6 +44,20 @@ jobs:
 
       - name: Install Playwright browsers
         run: python -m playwright install --with-deps chromium
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          mkdir -p voice_transcriber/static/spa_dist
+          cp -r frontend/dist/* voice_transcriber/static/spa_dist/
 
       - name: Run Playwright E2E test
         run: python -m pytest voice_transcriber/tests/test_e2e_playwright_upload.py -m integration -q
