@@ -15,7 +15,10 @@ PRODUCTION = ENV == 'production'
 RECORDINGS = BASE_DIR / "recordings"
 RECORDINGS.mkdir(exist_ok=True)
 
-STATIC_DIR = str(BASE_DIR / "static")
+# frontend/ is the single source dir for all frontend files; the backend
+# serves the Vite build output straight from frontend/dist/ (no separate
+# static/ copy) - see the repo README's "Frontend" section.
+FRONTEND_DIST_DIR = str(BASE_DIR.parent / "frontend" / "dist")
 
 # Protect /api/login from brute-force attempts.
 LOGIN_ATTEMPT_WINDOW_SEC = 300

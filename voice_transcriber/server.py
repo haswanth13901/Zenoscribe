@@ -60,22 +60,25 @@ def _startup():
 
 @app.get("/")
 async def root():
-    return FileResponse(f"{config.STATIC_DIR}/login.html")
+    # login.html is sourced from frontend/public/ (single source of truth
+    # for all frontend files - see the repo README's "Frontend" section)
+    # and lands here via Vite's public-dir copy when frontend/ is built.
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/login.html")
 
 
 @app.get("/login")
 async def login_page():
-    return FileResponse(f"{config.STATIC_DIR}/login.html")
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/login.html")
 
 
 @app.get("/home")
 @app.get("/home/")
 async def home_page():
     # /home and /app are both client-side routes of the one React SPA built
-    # by frontend/ into static/spa_dist/ - see the repo README's "Frontend"
+    # by frontend/ into frontend/dist/ - see the repo README's "Frontend"
     # section to build it. More routes join this same shell as more pages
     # migrate (admin, translate).
-    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/app")
@@ -84,7 +87,7 @@ async def app_page():
     # Same built SPA shell as /home (see above); react-router decides what
     # renders client-side. Both the bare and trailing-slash forms are served
     # directly so a stray slash doesn't cause a 307 redirect.
-    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/admin")
@@ -93,7 +96,7 @@ async def admin_page():
     # Same built SPA shell as /home and /app; react-router decides what
     # renders client-side (and gates it to admins - see RequireAuth's
     # adminOnly prop in frontend/).
-    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/translate")
@@ -101,7 +104,7 @@ async def admin_page():
 async def translate_page():
     # Same built SPA shell as /home, /app and /admin; react-router decides
     # what renders client-side.
-    return FileResponse(f"{config.STATIC_DIR}/spa_dist/index.html")
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/api/languages")
@@ -131,4 +134,4 @@ class NoCacheStaticFiles(StaticFiles):
 # NOTE: the recordings directory is deliberately NOT mounted as static.
 # Serving it would let anyone with a filename bypass auth entirely.
 # All access goes through /api/recordings/{id}/audio, which checks ownership.
-app.mount("/static", NoCacheStaticFiles(directory=config.STATIC_DIR), name="static")
+app.mount("/static", NoCacheStaticFiles(directory=config.FRONTEND_DIST_DIR), name="static")

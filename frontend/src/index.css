@@ -1,6 +1,7 @@
 /* Structural reset only — every design token (colors, etc.) lives in
-   /static/theme.css, the single source of truth linked in index.html.
-   Nothing in this app redefines :root custom properties. */
+   public/theme.css (served at /static/theme.css), the single source of
+   truth linked in index.html. Nothing in this app redefines :root custom
+   properties. */
 
 * {
   box-sizing: border-box;

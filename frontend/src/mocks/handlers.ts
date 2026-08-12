@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
-import type { Recording } from "../features/recordings/types";
-import type { AdminUser } from "../features/users/types";
+import type { Recording } from "@/entities/recording/model/types";
+import type { AdminUser } from "@/entities/user/model/types";
 
 export const sampleRecordings: Recording[] = [
   {
@@ -55,7 +55,9 @@ export const handlers = [
     HttpResponse.json({ id: params.id, text: "[0.0s] user-1: hello\n[1.2s] user-2: hi" }),
   ),
   http.delete("/api/recordings/:id", () => HttpResponse.json({ ok: true })),
-  http.get("/api/recordings/:id/audio", () => HttpResponse.arrayBuffer(new ArrayBuffer(4), { headers: { "Content-Type": "audio/wav" } })),
+  http.get("/api/recordings/:id/audio", () =>
+    HttpResponse.arrayBuffer(new ArrayBuffer(4), { headers: { "Content-Type": "audio/wav" } }),
+  ),
   http.get("/api/languages", () =>
     HttpResponse.json({
       languages: [
@@ -66,6 +68,12 @@ export const handlers = [
     }),
   ),
   http.post("/api/transcribe/translate", async ({ request }) =>
-    HttpResponse.json({ turns: [{ text: `transcribed:${new URL(request.url).searchParams.get("target_language") ?? "none"}` }] }),
+    HttpResponse.json({
+      turns: [
+        {
+          text: `transcribed:${new URL(request.url).searchParams.get("target_language") ?? "none"}`,
+        },
+      ],
+    }),
   ),
 ];

@@ -56,8 +56,6 @@ jobs:
         run: |
           npm --prefix frontend ci
           npm --prefix frontend run build
-          mkdir -p voice_transcriber/static/spa_dist
-          cp -r frontend/dist/* voice_transcriber/static/spa_dist/
 
       - name: Run Playwright E2E test
         run: python -m pytest voice_transcriber/tests/test_e2e_playwright_upload.py -m integration -q

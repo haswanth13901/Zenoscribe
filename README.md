@@ -240,12 +240,26 @@ All four post-login pages — `/home`, `/app` (the recorder), `/admin` and
 `/translate` — are migrated off vanilla JS, completing the staged plan in
 `Update_Roadmap.txt` (`/home` → recorder → admin → translate). All four are
 client-side routes of one SPA in `frontend/` (Vite + React + TypeScript +
-Redux Toolkit/RTK Query), built into `voice_transcriber/static/spa_dist/`,
-which `server.py` serves for all four routes — react-router decides what
-renders (and gates `/admin` to admins client-side via `RequireAuth`'s
-`adminOnly` prop). `login.html` is untouched and still served the old way
-(pre-auth, no reason to migrate). The old vanilla `home.html`/`index.html`/
-`admin.html`/`translate.html` and the shared scripts they used
+Redux Toolkit/RTK Query) — react-router decides what renders (and gates
+`/admin` to admins client-side via `RequireAuth`'s `adminOnly` prop).
+
+`frontend/` is the single source directory for **every** frontend file in
+the repo, including the handful that aren't part of the React bundle:
+`frontend/public/login.html` (pre-auth sign-in page, deliberately kept
+vanilla — no reason to migrate), `theme.css` and `theme-preboot.js` (shared
+dark-mode styling/boot, linked by `frontend/index.html`), and
+`pcm-worklet.js` (the recorder/translate mic-capture AudioWorklet, loaded
+by raw URL rather than bundled — a browser requirement for worklet
+modules). Vite's `public/` dir copies these verbatim into `frontend/dist/`
+on every build, same as the rest of the bundle — no separate copy step,
+no second directory. `server.py` (`config.FRONTEND_DIST_DIR`) serves
+straight out of `frontend/dist/`: `/`, `/login`, and the `/static/*` mount
+all read from it directly, and so do `/home`, `/app`, `/admin` and
+`/translate` (all serving `frontend/dist/index.html`, the SPA shell).
+There is no `voice_transcriber/static/` any more.
+
+The old vanilla `home.html`/`index.html`/`admin.html`/`translate.html` and
+the shared scripts they used
 (`header.js`/`sidebar.js`/`theme-toggle.js`/`upload.js`/`recorder-turns.js`/
 `translate-views.js`) were kept as a rollback path through the migration
 and have since been deleted, now that the SPA is confirmed stable — restore
@@ -268,29 +282,80 @@ handled by Vite itself rather than proxied — so logging in through the real
 production, and the recorder's and translate page's live WebSockets connect
 correctly under `npm run dev` too.
 
-Build (required before any of the four routes serve anything outside `npm run dev`):
+`/login` is proxied straight to the FastAPI server rather than served by
+Vite, so — like `/home`/`/app`/`/admin`/`/translate` — it needs one
+`npm --prefix frontend run build` on a fresh checkout before it serves
+anything (`frontend/dist/` doesn't exist until then). `theme.css`,
+`theme-preboot.js` and `pcm-worklet.js` don't have this requirement: they're
+requested by the SPA shell as `%BASE_URL%<file>` /
+`import.meta.env.BASE_URL`, which resolves to plain root paths in dev
+(e.g. `/theme.css`), served directly by Vite from `frontend/public/` with
+no build and no backend round-trip.
+
+Build (required before `/`, `/login`, or any of the four SPA routes serve
+anything outside `npm run dev`):
 
 ```bash
 npm --prefix frontend run build
 ```
 
-This writes to `frontend/dist/`, which is copied into
-`voice_transcriber/static/spa_dist/` by the `Dockerfile`'s build stage. For
-a non-Docker run, copy it yourself after building:
-
-```bash
-# POSIX
-cp -r frontend/dist/* voice_transcriber/static/spa_dist/
-
-# Windows PowerShell
-Copy-Item -Recurse -Force frontend/dist/* voice_transcriber/static/spa_dist/
-```
+This writes everything the backend needs straight to `frontend/dist/` —
+the SPA shell, its hashed assets, and (via Vite's public-dir copy)
+`login.html`, `theme.css`, `theme-preboot.js` and `pcm-worklet.js`. Nothing
+else to copy, in Docker or out of it — the `Dockerfile`'s final stage just
+copies `frontend/dist/` from the build stage into the image at the same
+path.
 
 Frontend tests:
 
 ```bash
 npm --prefix frontend run test
 ```
+
+Formatting (Prettier; not enforced in CI yet, run before committing):
+
+```bash
+npm --prefix frontend run format        # rewrite in place
+npm --prefix frontend run format:check  # CI-style check, no writes
+```
+
+There's deliberately no `lint` script yet: `typescript-eslint` doesn't
+support TypeScript 7 (this project's compiler) as of this writing - it
+hard-errors on import rather than degrading gracefully. Revisit once
+[their TS 7 support lands](https://github.com/typescript-eslint/typescript-eslint/issues/10940);
+`tsc -b`'s own `strict`/`noUnusedLocals`/`noUnusedParameters` in the
+meantime catch a meaningful chunk of what a linter would.
+
+### Frontend source layout (Feature-Sliced Design)
+
+`frontend/src/` follows [Feature-Sliced Design](https://feature-sliced.design/):
+higher layers may import from lower ones, never the reverse.
+
+```
+app/       Redux store + typed hooks (store.ts, hooks.ts)
+pages/     Route-level compositions - home, recorder, admin, translate.
+           Each is <page>/ui/ holding that page's own component tree
+           (nothing in here is imported by any other slice)
+widgets/   Composite UI used across multiple pages: app-layout, header, sidebar
+features/  User-facing interactions with their own state: auth, recorder,
+           translate, transcribe (upload), theme
+entities/  Fetched domain data + its API: recording, user, language, speaker
+shared/    Business-agnostic code: api/baseApi.ts (RTK Query base),
+           lib/ (pure formatting/parsing helpers - fmtDate, initials, etc.)
+```
+
+Within a slice, code is grouped by segment: `ui/` (components), `model/`
+(state, types, hooks), `api/` (RTK Query endpoints), `lib/` (pure helpers
+scoped to that slice). Tests are colocated as `Foo.test.tsx` next to `Foo.tsx`
+throughout - the one test-file convention used everywhere, rather than a mix
+of colocated files and `__tests__/` folders.
+
+Cross-slice imports use the `@/` alias (e.g. `@/entities/user/api/usersApi`),
+configured in `tsconfig.app.json`, `vite.config.ts` and `vitest.config.ts` -
+so import paths don't depend on how deeply nested the importing file is.
+`main.tsx`, `index.css`, `setupTests.ts` and `mocks/` (MSW test handlers)
+sit outside the layer system, same as any FSD app's entry point and test
+infra.
 
 ## Project structure
 
@@ -302,13 +367,17 @@ routes_api.py     Auth, user administration, recording access
 auth.py           JWT, bcrypt, role guards
 db.py             SQLite storage (users, recordings, presence)
 soniox_client.py  Soniox REST + WebSocket config, speaker labeling
-static/
-  login.html        Sign-in page - the only page still served the old way
-  theme-preboot.js    Pre-paint dark-mode flip only, used by spa_dist/index.html
-  pcm-worklet.js      Browser mic -> 16 kHz PCM - loaded directly by the
-                      React recorder and translate pages
-  spa_dist/          Built output of frontend/ (gitignored, see "Frontend" above)
-frontend/          React + Redux Toolkit source for all four pages (Vite + TypeScript)
+frontend/          Single source dir for every frontend file (Vite + React +
+                   TypeScript + Redux Toolkit). Builds to frontend/dist/
+                   (gitignored), served directly by server.py - see
+                   "Frontend" above.
+  public/            Files served as-is, not processed by Vite: login.html
+                     (still vanilla, pre-auth), theme.css/theme-preboot.js
+                     (shared dark-mode styling/boot), pcm-worklet.js (mic
+                     capture AudioWorklet, loaded by raw URL)
+  src/               React + Redux Toolkit source for all four post-login
+                     pages, in Feature-Sliced Design layers - see "Frontend
+                     source layout" above
 ```
 
 The two routers (`routes_api`, `transcribe`) never import each other — both

@@ -1,0 +1,30 @@
+.git/
+.github/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Frontend - node_modules and dist are rebuilt in the frontend-build stage,
+# not needed (or wanted, if stale) from the host.
+frontend/node_modules/
+frontend/dist/
+
+# Application data / secrets
+.env
+*.env
+!.env.example
+app.db
+*.sqlite
+*.sqlite3
+voice_transcriber/recordings/
+
+# Editors
+.vscode/
+.idea/

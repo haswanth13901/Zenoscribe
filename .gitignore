@@ -18,10 +18,9 @@ app.db-shm
 /voice_transcriber/recordings/
 !/voice_transcriber/recordings/.gitkeep
 
-# --- Frontend (frontend/, the React/RTK pilot for /home) ---
+# --- Frontend (frontend/, the single source dir for all frontend files) ---
 frontend/node_modules/
 frontend/dist/
-voice_transcriber/static/spa_dist/
 
 # --- Python ---
 __pycache__/

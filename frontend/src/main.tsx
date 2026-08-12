@@ -2,12 +2,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Provider } from "react-redux";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { store } from "./app/store";
-import { RequireAuth } from "./features/auth/RequireAuth";
-import { HomePage } from "./pages/home/HomePage";
-import { RecorderPage } from "./pages/recorder/RecorderPage";
-import { AdminPage } from "./pages/admin/AdminPage";
-import { TranslatePage } from "./pages/translate/TranslatePage";
+import { store } from "@/app/store";
+import { RequireAuth } from "@/features/auth/ui/RequireAuth";
+import { HomePage } from "@/pages/home/ui/HomePage";
+import { RecorderPage } from "@/pages/recorder/ui/RecorderPage";
+import { AdminPage } from "@/pages/admin/ui/AdminPage";
+import { TranslatePage } from "@/pages/translate/ui/TranslatePage";
 import "./index.css";
 
 // This is the last page in the staged migration - all four post-login

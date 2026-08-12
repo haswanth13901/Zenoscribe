@@ -25,7 +25,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
     if [ -f /app/requirements.txt ]; then pip install --no-cache-dir -r /app/requirements.txt; fi
 
 COPY . /app
-COPY --from=frontend-build /app/frontend/dist /app/voice_transcriber/static/spa_dist
+# frontend/ is the single source dir for all frontend files; the backend
+# serves this build output directly (config.FRONTEND_DIST_DIR) - see the
+# repo README's "Frontend" section.
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 EXPOSE 8000
 

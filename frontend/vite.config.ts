@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -10,11 +11,17 @@ const BACKEND_ORIGIN = "http://localhost:8000";
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   // Production build assets are served by FastAPI's existing /static mount,
-  // from voice_transcriber/static/spa_dist/ (see server.py's /home, /app,
-  // /admin and /translate routes - all client-side routes of this one SPA
-  // build).
-  base: command === "build" ? "/static/spa_dist/" : "/",
+  // straight from frontend/dist/ (see config.FRONTEND_DIST_DIR and
+  // server.py's /home, /app, /admin and /translate routes - all client-side
+  // routes of this one SPA build - plus / and /login for the still-vanilla
+  // login.html, which lands in dist/ via Vite's public-dir copy below).
+  base: command === "build" ? "/static/" : "/",
   build: {
     outDir: "dist",
   },
