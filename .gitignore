@@ -15,8 +15,8 @@ app.db-shm
 *.sqlite3
 
 # Saved audio and transcripts - user data, can be large, regenerated at runtime.
-recordings/
-!recordings/.gitkeep
+/voice_transcriber/recordings/
+!/voice_transcriber/recordings/.gitkeep
 
 # --- Frontend (frontend/, the React/RTK pilot for /home) ---
 frontend/node_modules/
