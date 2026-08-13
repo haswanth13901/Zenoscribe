@@ -55,8 +55,13 @@ def test_translate_page_mode_toggle_swaps_language_fields(live_server):
         page = context.new_page()
 
         page.goto(live_server.base_url + "/translate")
-        page.wait_for_selector('[data-testid="translate-status"]', timeout=10000)
-        assert page.inner_text('[data-testid="translate-status"]') == "idle"
+        # state="attached", not the default "visible" - the span is empty
+        # at idle (see below), which Playwright treats as zero-size/hidden.
+        page.wait_for_selector('[data-testid="translate-status"]', state="attached", timeout=10000)
+        # "idle" is blanked out in the UI (TranslatePage.tsx) - only
+        # non-idle status text (connecting, listening, stopped, errors)
+        # ever shows.
+        assert page.inner_text('[data-testid="translate-status"]') == ""
 
         assert page.query_selector("#target-language") is not None
         assert page.query_selector("#language-a") is None
@@ -99,9 +104,9 @@ def test_translate_page_start_reaches_connecting_then_settles(live_server):
 
         page.click('[data-testid="translate-toggle"]')
         # Soniox-independent: the toggle disables and status moves off
-        # "idle" as soon as the client starts connecting.
+        # blank/"idle" as soon as the client starts connecting.
         page.wait_for_function(
-            "document.querySelector('[data-testid=\"translate-status\"]').textContent !== 'idle'", timeout=10000
+            "document.querySelector('[data-testid=\"translate-status\"]').textContent !== ''", timeout=10000
         )
 
         # Without real Soniox credentials, "ready" is unreachable (the

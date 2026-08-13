@@ -74,9 +74,11 @@ describe("TranslatePage", () => {
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia } });
   });
 
-  it("renders the toolbar idle, defaulting to one-way mode", () => {
+  it("renders the toolbar idle (blanked out), defaulting to one-way mode", () => {
     renderTranslatePage();
-    expect(screen.getByTestId("translate-status")).toHaveTextContent("idle");
+    // "idle" is blanked out - only non-idle status text (connecting,
+    // listening, stopped, errors) renders in this slot.
+    expect(screen.getByTestId("translate-status")).toHaveTextContent("");
     expect(screen.getByTestId("translate-toggle")).toHaveTextContent("Start");
     expect(screen.getByLabelText("Translate into")).toBeInTheDocument();
     expect(screen.queryByLabelText("Language A")).not.toBeInTheDocument();

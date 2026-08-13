@@ -1,0 +1,164 @@
+import { useState, type ReactElement } from "react";
+import { useAppSelector } from "@/app/hooks";
+import { AppLayout } from "@/widgets/app-layout/ui/AppLayout";
+import {
+  useGetRecordingsQuery,
+  useLazyGetTranscriptQuery,
+} from "@/entities/recording/api/recordingsApi";
+import type { Recording } from "@/entities/recording/model/types";
+import { downloadAuthenticated, triggerBlobDownload } from "@/shared/lib/download";
+import { fmtDate } from "@/shared/lib/fmtDate";
+import { fmtDur } from "@/shared/lib/formatters";
+import styles from "./MyRecordingsPage.module.css";
+
+function RecordingRow({
+  recording,
+  onError,
+}: {
+  recording: Recording;
+  onError: (message: string | null) => void;
+}): ReactElement {
+  const token = useAppSelector((s) => s.auth.token);
+  const [getTranscript] = useLazyGetTranscriptQuery();
+
+  async function downloadTranscript() {
+    onError(null);
+    try {
+      const d = await getTranscript(recording.id).unwrap();
+      triggerBlobDownload(new Blob([d.text], { type: "text/plain" }), `${recording.id}.txt`);
+    } catch {
+      onError("Transcript download failed");
+    }
+  }
+
+  async function downloadAudio() {
+    onError(null);
+    try {
+      await downloadAuthenticated(
+        `${window.location.origin}/api/recordings/${recording.id}/audio`,
+        token,
+        `${recording.id}.wav`,
+      );
+    } catch {
+      onError("Audio download failed");
+    }
+  }
+
+  return (
+    <tr>
+      <td>{fmtDate(recording.started_at)}</td>
+      <td>{fmtDur(recording.duration)}</td>
+      <td>{recording.turn_count}</td>
+      <td className={styles.preview}>{recording.preview || "—"}</td>
+      <td>
+        <div className={styles.rowActions}>
+          <button type="button" onClick={downloadTranscript}>
+            Transcript
+          </button>
+          <button type="button" onClick={downloadAudio}>
+            Audio
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// Full-page replacement for the old /app-hosted slide-out drawer
+// (RecordingsDrawer, since deleted) - a dedicated route so a user's own
+// recordings get the same full-width, filterable-table treatment
+// AdminRecordingsPane gives every user's recordings on /admin, just scoped
+// to the signed-in user (no user-filter dropdown needed).
+export function MyRecordingsPage(): ReactElement {
+  const user = useAppSelector((s) => s.auth.user)!;
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const {
+    data: recordings,
+    isLoading,
+    isError,
+    refetch,
+  } = useGetRecordingsQuery({
+    user_id: user.id,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  });
+
+  function clearFilters() {
+    setDateFrom("");
+    setDateTo("");
+  }
+
+  return (
+    <AppLayout user={user}>
+      <main className={styles.main}>
+        <div className={styles.panel}>
+          <h2 className={styles.heading}>My recordings</h2>
+          <div className={styles.filters}>
+            <div>
+              <label htmlFor="my-rec-filter-from">From</label>
+              <input
+                id="my-rec-filter-from"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="my-rec-filter-to">To</label>
+              <input
+                id="my-rec-filter-to"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+            </div>
+            <div className={styles.filterActions}>
+              <button type="button" onClick={clearFilters}>
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {isLoading && <div className={styles.empty}>Loading...</div>}
+
+          {!isLoading && isError && (
+            <div className={styles.errorState}>
+              Couldn't load your recordings.
+              <button type="button" className={styles.retryBtn} onClick={refetch}>
+                Try again
+              </button>
+            </div>
+          )}
+
+          {!isLoading && !isError && recordings && recordings.length === 0 && (
+            <div className={styles.empty}>No recordings yet.</div>
+          )}
+
+          {!isLoading && !isError && recordings && recordings.length > 0 && (
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Length</th>
+                  <th>Turns</th>
+                  <th>Preview</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {recordings.map((r) => (
+                  <RecordingRow key={r.id} recording={r} onError={setActionError} />
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {actionError && <div className={styles.actionError}>{actionError}</div>}
+        </div>
+      </main>
+    </AppLayout>
+  );
+}

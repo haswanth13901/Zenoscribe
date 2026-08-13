@@ -31,13 +31,15 @@ function formatUploadError(error: FetchBaseQueryError | SerializedError | undefi
     : `Transcription failed: ${message}`;
 }
 
-// Port of upload.js's batch-transcribe widget, shared by /app (the
-// recorder) and /admin, both opened via a ?upload=1 deep-link instead of a
-// page-owned #uploadBtn. Auto-opening the native file picker (as the
-// original's uploadBtn.onclick did) isn't reliably possible from a
-// route-change effect - browsers only allow it synchronously inside a real
-// click handler - so this shows a visible "Choose file" trigger instead, a
-// deliberate small UX adaptation, not a missed port.
+// Port of upload.js's batch-transcribe widget, now mounted only by
+// UploadPage.tsx (/upload) - kept as its own open/onClose-driven component
+// rather than inlined there, since UploadPanel.test.tsx's full behavioral
+// coverage stays independent of wherever it's mounted. Auto-opening the
+// native file picker (as the original's uploadBtn.onclick did) isn't
+// reliably possible from a route-change effect - browsers only allow it
+// synchronously inside a real click handler - so this shows a visible
+// "Choose file" trigger instead, a deliberate small UX adaptation, not a
+// missed port.
 export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement | null {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);

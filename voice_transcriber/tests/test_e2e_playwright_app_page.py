@@ -82,14 +82,16 @@ def _run_start_stop_flow(live_server, token, user_obj):
 
         page.goto(live_server.base_url + "/app")
         page.wait_for_selector('[data-testid="recorder-toggle"]', timeout=10000)
-        assert page.inner_text('[data-testid="recorder-status"]') == "idle"
+        # "idle" is blanked out in the UI (RecorderPage.tsx) - only non-idle
+        # status text (connecting, listening, stopped, errors) ever shows.
+        assert page.inner_text('[data-testid="recorder-status"]') == ""
         assert page.inner_text('[data-testid="recorder-toggle"]') == "Start"
 
         page.click('[data-testid="recorder-toggle"]')
         # Soniox-independent: the toggle disables and status moves off
-        # "idle" as soon as the client starts connecting.
+        # blank/"idle" as soon as the client starts connecting.
         page.wait_for_function(
-            "document.querySelector('[data-testid=\"recorder-status\"]').textContent !== 'idle'", timeout=10000
+            "document.querySelector('[data-testid=\"recorder-status\"]').textContent !== ''", timeout=10000
         )
 
         # Whatever happens with the upstream Soniox connection, the toggle
@@ -111,65 +113,3 @@ def _run_start_stop_flow(live_server, token, user_obj):
 
         context.close()
         browser.close()
-
-
-@pytest.mark.integration
-def test_app_page_recordings_drawer_download_and_delete(live_server):
-    import requests
-    from playwright.sync_api import sync_playwright
-
-    from voice_transcriber import config, db
-
-    r = requests.post(
-        live_server.base_url + "/api/login",
-        json={"username": live_server.admin_username, "password": live_server.admin_password},
-    )
-    assert r.status_code == 200, r.text
-    token = r.json()["token"]
-    user_obj = r.json()["user"]
-
-    # Seeded directly against the live_server fixture's tmp_path/app.db,
-    # before the subprocess ever starts writing to it - same pattern the
-    # fixture itself already uses to create the admin user. config.RECORDINGS
-    # is NOT overridden by live_server (unlike isolated_recordings elsewhere,
-    # which can't reach a separate subprocess anyway), so the transcript
-    # file has to be written to the real recordings/ dir for the download
-    # endpoint's on-disk check to pass - cleaned up in `finally` regardless
-    # of outcome, same spirit as recordings/ being gitignored/regenerable.
-    rec_id = "20260101-000000-e2e_admin-abc123"
-    txt_path = config.RECORDINGS / f"{rec_id}.txt"
-    txt_path.write_text("[0.0s] user-1: hello\n", encoding="utf-8")
-    try:
-        db.add_recording(
-            rec_id=rec_id,
-            user_id=user_obj["id"],
-            wav_file=f"{rec_id}.wav",
-            txt_file=f"{rec_id}.txt",
-            started_at="2026-01-01T00:00:00+00:00",
-            duration=12.3,
-            turn_count=2,
-            preview="hello from the seeded recording",
-        )
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            context.add_init_script(seed_auth_script(token, user_obj))
-            page = context.new_page()
-
-            page.goto(live_server.base_url + "/app?recordings=1")
-            page.wait_for_selector("text=hello from the seeded recording", timeout=10000)
-
-            with page.expect_download() as download_info:
-                page.click("text=Transcript")
-            download = download_info.value
-            assert download.suggested_filename == f"{rec_id}.txt"
-
-            page.once("dialog", lambda dialog: dialog.accept())
-            page.click("text=Delete")
-            page.wait_for_selector("text=No recordings yet.", timeout=10000)
-
-            context.close()
-            browser.close()
-    finally:
-        txt_path.unlink(missing_ok=True)

@@ -38,24 +38,21 @@ describe("AdminPage", () => {
     expect(screen.getByText("Register a user")).toBeInTheDocument();
   });
 
-  it("switches to the Recordings tab on click", async () => {
-    renderAdminPage();
-    await waitFor(() => expect(screen.getByText(sampleUsers[0].username)).toBeInTheDocument());
-    // Not `getByRole("button", { name: "All Recordings" })` - the sidebar
-    // also has an "All Recordings" button (its admin-group deep-link).
-    await userEvent.click(screen.getByTestId("tab-recordings"));
-    await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
-    expect(screen.queryByText("Register a user")).not.toBeInTheDocument();
-  });
-
   it("opens directly on the Recordings tab via the ?tab=recordings deep-link", async () => {
     renderAdminPage("/admin?tab=recordings");
     await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
     expect(screen.queryByText("Register a user")).not.toBeInTheDocument();
   });
 
-  it("opens the upload panel via the ?upload=1 deep-link", async () => {
-    renderAdminPage("/admin?upload=1");
-    await waitFor(() => expect(screen.getByText("Transcribe a file")).toBeInTheDocument());
+  it("clicking Admin console from the Recordings tab switches back to Users", async () => {
+    renderAdminPage("/admin?tab=recordings");
+    await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
+
+    // Regression: Admin console used to link to bare /admin, a same-URL
+    // no-op while already on /admin (search cleared post-deep-link) - it
+    // never actually re-rendered, so the page stayed stuck on Recordings.
+    await userEvent.click(screen.getByRole("link", { name: "Admin console" }));
+    await waitFor(() => expect(screen.getByText("Register a user")).toBeInTheDocument());
+    expect(screen.queryByText(sampleRecordings[0].preview)).not.toBeInTheDocument();
   });
 });

@@ -107,6 +107,26 @@ async def translate_page():
     return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
+@app.get("/recordings")
+@app.get("/recordings/")
+async def recordings_page():
+    # Same built SPA shell as the other four; the current user's own
+    # recordings, filterable by date - formerly a slide-out drawer over
+    # /app, now its own route. Distinct from GET /api/recordings (routes_api.py).
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
+
+
+@app.get("/upload")
+@app.get("/upload/")
+async def upload_page():
+    # Same built SPA shell as the other five; the batch transcribe form -
+    # formerly opened as a panel over /app or /admin via a ?upload=1
+    # deep-link, now its own route so it isn't rendered on top of either
+    # page's leftover content. Distinct from POST /api/transcribe/translate
+    # (transcribe.py), which this page's form submits to.
+    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
+
+
 @app.get("/api/languages")
 async def language_list():
     return {

@@ -8,6 +8,8 @@ import { HomePage } from "@/pages/home/ui/HomePage";
 import { RecorderPage } from "@/pages/recorder/ui/RecorderPage";
 import { AdminPage } from "@/pages/admin/ui/AdminPage";
 import { TranslatePage } from "@/pages/translate/ui/TranslatePage";
+import { MyRecordingsPage } from "@/pages/recordings/ui/MyRecordingsPage";
+import { UploadPage } from "@/pages/upload/ui/UploadPage";
 import "./index.css";
 
 // This is the last page in the staged migration - all four post-login
@@ -46,6 +48,22 @@ createRoot(document.getElementById("root")!).render(
             element={
               <RequireAuth>
                 <TranslatePage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/recordings"
+            element={
+              <RequireAuth>
+                <MyRecordingsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/upload"
+            element={
+              <RequireAuth>
+                <UploadPage />
               </RequireAuth>
             }
           />

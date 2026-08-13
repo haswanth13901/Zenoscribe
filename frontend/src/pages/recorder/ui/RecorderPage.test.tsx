@@ -80,7 +80,9 @@ describe("RecorderPage", () => {
     expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
     expect(screen.getByText("Press Start and speak.")).toBeInTheDocument();
-    expect(screen.getByText("idle")).toBeInTheDocument();
+    // "idle" is blanked out - only non-idle status text (connecting,
+    // listening, stopped, errors) renders in this slot.
+    expect(screen.getByTestId("recorder-status")).toHaveTextContent("");
   });
 
   it("Save is disabled with no turns", () => {
@@ -100,17 +102,5 @@ describe("RecorderPage", () => {
       },
     });
     await waitFor(() => expect(screen.getByText("connecting")).toBeInTheDocument());
-  });
-
-  it("opens the recordings drawer via the ?recordings=1 deep-link", async () => {
-    renderRecorderPage("/app?recordings=1");
-    // The sidebar also has a "My recordings" button, so assert on
-    // something unique to the open drawer itself.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument());
-  });
-
-  it("opens the upload panel via the ?upload=1 deep-link", async () => {
-    renderRecorderPage("/app?upload=1");
-    await waitFor(() => expect(screen.getByText("Transcribe a file")).toBeInTheDocument());
   });
 });

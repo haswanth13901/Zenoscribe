@@ -15,8 +15,8 @@ export const recordingsApi = baseApi.injectEndpoints({
       // Also invalidates "Users": on /admin, deleting a recording changes
       // the owning user's recording_count shown in the Users tab (matches
       // admin.html's delRec() refreshing both loadRecs() and loadUsers()).
-      // A harmless no-op cache tag for /app's RecordingsDrawer, which never
-      // subscribes to anything "Users"-tagged.
+      // A harmless no-op cache tag for /recordings (MyRecordingsPage.tsx),
+      // which never subscribes to anything "Users"-tagged.
       invalidatesTags: ["Recordings", "Users"],
     }),
   }),

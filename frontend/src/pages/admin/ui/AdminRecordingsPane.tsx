@@ -80,9 +80,9 @@ function RecordingRow({
   );
 }
 
-// Port of admin.html's "All recordings" tab - a full inline table, not the
-// slide-out drawer /app uses (RecordingsDrawer.tsx), but built on the same
-// recordingsApi hooks and lib/download.ts utilities that component uses.
+// Port of admin.html's "All recordings" tab - a full inline table across
+// every user, unlike MyRecordingsPage.tsx's per-user /recordings page, but
+// built on the same recordingsApi hooks and lib/download.ts utilities.
 export function AdminRecordingsPane(): ReactElement {
   const [userId, setUserId] = useState("");
   const [dateFrom, setDateFrom] = useState("");

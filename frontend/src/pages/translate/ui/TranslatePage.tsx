@@ -93,7 +93,9 @@ export function TranslatePage(): ReactElement {
         >
           {state.status === "listening" && elapsed
             ? `${state.statusMessage} · ${elapsed}`
-            : state.statusMessage}
+            : state.statusMessage === "idle"
+              ? ""
+              : state.statusMessage}
         </span>
       </div>
 

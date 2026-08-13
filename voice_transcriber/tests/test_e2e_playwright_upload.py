@@ -6,12 +6,12 @@ modes (timeout/runtime), and asserts the upload panel's inline error text
 for each.
 
 Previously drove upload.js's vanilla #uploadBtn UI on /app and asserted
-window.alert() calls. /app is now the React recorder (see
-test_e2e_playwright_app_page.py); its ported UploadPanel (opened via
-?upload=1) shows the same diagnostic info (status + server detail) inline
-instead of via alert() - see UploadPanel.tsx's formatUploadError(). This
-test was rewritten in place rather than left targeting a page that no
-longer has the elements it drove.
+window.alert() calls, then the ported UploadPanel opened via a ?upload=1
+deep-link over /app. It's since gained its own route, /upload (see
+UploadPage.tsx - the diagnostic info, status + server detail, still shows
+inline instead of via alert(); see UploadPanel.tsx's formatUploadError()).
+This test was rewritten in place each time rather than left targeting UI
+that no longer exists.
 
 This is one of the few tests in the suite that genuinely needs a live
 server and a real browser - everything else in the fast suite goes through
@@ -23,6 +23,22 @@ import time
 
 import pytest
 import requests
+
+
+@pytest.mark.integration
+def test_upload_page_redirects_unauthenticated_to_login(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+
+        page.goto(live_server.base_url + "/upload")
+        page.wait_for_url("**/login", timeout=10000)
+
+        context.close()
+        browser.close()
 
 
 @pytest.mark.integration
@@ -57,7 +73,7 @@ def test_e2e_playwright_upload_inline_error(live_server, make_wav, tmp_path):
         context = browser.new_context()
         context.add_init_script(init_script())
         page = context.new_page()
-        page.goto(live_server.base_url + "/app?upload=1")
+        page.goto(live_server.base_url + "/upload")
 
         # The file input is deliberately hidden (triggered indirectly via
         # the "Choose file" button) - wait for it to be attached, not

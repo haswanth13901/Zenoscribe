@@ -1,12 +1,9 @@
-import { useEffect, useState, type ReactElement } from "react";
-import { useSearchParams } from "react-router-dom";
+import type { ReactElement } from "react";
 import { useAppSelector } from "@/app/hooks";
 import { AppLayout } from "@/widgets/app-layout/ui/AppLayout";
 import { useRecorderConnection } from "@/features/recorder/model/useRecorderConnection";
 import { triggerBlobDownload } from "@/shared/lib/download";
 import { turnsToText } from "@/features/recorder/lib/transcriptText";
-import { UploadPanel } from "@/features/transcribe/ui/UploadPanel";
-import { RecordingsDrawer } from "@/pages/recorder/ui/RecordingsDrawer";
 import { TurnList } from "@/pages/recorder/ui/TurnList";
 import styles from "./RecorderPage.module.css";
 
@@ -14,34 +11,6 @@ import styles from "./RecorderPage.module.css";
 export function RecorderPage(): ReactElement {
   const user = useAppSelector((s) => s.auth.user)!;
   const { state, start, stop, clear } = useRecorderConnection();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [uploadOpen, setUploadOpen] = useState(false);
-
-  // Deep-links from the sidebar (?recordings=1, ?upload=1) - the param is
-  // cleared right after acting so a repeat click while already on /app
-  // (no location change otherwise) still re-opens the panel; see the plan.
-  useEffect(() => {
-    let changed = false;
-    if (searchParams.get("recordings") === "1") {
-      setDrawerOpen(true);
-      changed = true;
-    }
-    if (searchParams.get("upload") === "1") {
-      setUploadOpen(true);
-      changed = true;
-    }
-    if (changed) {
-      setSearchParams(
-        (prev) => {
-          prev.delete("recordings");
-          prev.delete("upload");
-          return prev;
-        },
-        { replace: true },
-      );
-    }
-  }, [searchParams, setSearchParams]);
 
   const isListening = state.status === "listening";
   const isBusy = state.status === "connecting" || state.status === "authenticating";
@@ -69,7 +38,7 @@ export function RecorderPage(): ReactElement {
           data-testid="recorder-status"
           className={`${styles.status} ${isListening ? styles.statusLive : ""} ${state.isError ? styles.statusError : ""}`}
         >
-          {state.statusMessage}
+          {state.statusMessage === "idle" ? "" : state.statusMessage}
         </span>
         <button
           type="button"
@@ -91,9 +60,6 @@ export function RecorderPage(): ReactElement {
       <main className={styles.main}>
         <TurnList turns={state.turns} partial={state.partial} />
       </main>
-
-      <UploadPanel open={uploadOpen} onClose={() => setUploadOpen(false)} />
-      <RecordingsDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </AppLayout>
   );
 }

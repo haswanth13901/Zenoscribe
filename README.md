@@ -236,12 +236,15 @@ secure deployment requirements.
 
 ## Frontend (React + Redux Toolkit)
 
-All four post-login pages — `/home`, `/app` (the recorder), `/admin` and
-`/translate` — are migrated off vanilla JS, completing the staged plan in
-`Update_Roadmap.txt` (`/home` → recorder → admin → translate). All four are
-client-side routes of one SPA in `frontend/` (Vite + React + TypeScript +
-Redux Toolkit/RTK Query) — react-router decides what renders (and gates
-`/admin` to admins client-side via `RequireAuth`'s `adminOnly` prop).
+All post-login pages — `/home`, `/app` (the recorder), `/admin`,
+`/translate`, `/recordings` (a user's own recordings, formerly a slide-out
+drawer over `/app`) and `/upload` (the batch transcribe form, formerly a
+`?upload=1` panel over `/app` or `/admin`) — are migrated off vanilla JS,
+completing the staged plan in `Update_Roadmap.txt` (`/home` → recorder →
+admin → translate). All six are client-side routes of one SPA in
+`frontend/` (Vite + React + TypeScript + Redux Toolkit/RTK Query) —
+react-router decides what renders (and gates `/admin` to admins
+client-side via `RequireAuth`'s `adminOnly` prop).
 
 `frontend/` is the single source directory for **every** frontend file in
 the repo, including the handful that aren't part of the React bundle:
@@ -254,8 +257,9 @@ modules). Vite's `public/` dir copies these verbatim into `frontend/dist/`
 on every build, same as the rest of the bundle — no separate copy step,
 no second directory. `server.py` (`config.FRONTEND_DIST_DIR`) serves
 straight out of `frontend/dist/`: `/`, `/login`, and the `/static/*` mount
-all read from it directly, and so do `/home`, `/app`, `/admin` and
-`/translate` (all serving `frontend/dist/index.html`, the SPA shell).
+all read from it directly, and so do `/home`, `/app`, `/admin`,
+`/translate`, `/recordings` and `/upload` (all serving
+`frontend/dist/index.html`, the SPA shell).
 There is no `voice_transcriber/static/` any more.
 
 The old vanilla `home.html`/`index.html`/`admin.html`/`translate.html` and
@@ -266,45 +270,28 @@ and have since been deleted, now that the SPA is confirmed stable — restore
 them from git history (`git log -- voice_transcriber/static/`) if ever
 needed.
 
-Dev (two terminals, from the repo root):
+Dev — there is no separate frontend dev server; FastAPI on `:8000` is the
+only thing you run, and it serves the frontend straight out of
+`frontend/dist/`. Build once, then start the backend:
 
 ```bash
-uvicorn voice_transcriber.server:app --reload --port 8000
 npm --prefix frontend install   # first time only
-npm --prefix frontend run dev
-```
-
-Open http://localhost:5173/home (or `/app`, `/admin`, `/translate`). The
-Vite dev server proxies everything it doesn't own (`/api`, `/ws`, `/login`,
-`/static`) to the FastAPI server on `:8000` — all four SPA routes are
-handled by Vite itself rather than proxied — so logging in through the real
-`/login` page and being redirected to `/home` works exactly as it will in
-production, and the recorder's and translate page's live WebSockets connect
-correctly under `npm run dev` too.
-
-`/login` is proxied straight to the FastAPI server rather than served by
-Vite, so — like `/home`/`/app`/`/admin`/`/translate` — it needs one
-`npm --prefix frontend run build` on a fresh checkout before it serves
-anything (`frontend/dist/` doesn't exist until then). `theme.css`,
-`theme-preboot.js` and `pcm-worklet.js` don't have this requirement: they're
-requested by the SPA shell as `%BASE_URL%<file>` /
-`import.meta.env.BASE_URL`, which resolves to plain root paths in dev
-(e.g. `/theme.css`), served directly by Vite from `frontend/public/` with
-no build and no backend round-trip.
-
-Build (required before `/`, `/login`, or any of the four SPA routes serve
-anything outside `npm run dev`):
-
-```bash
 npm --prefix frontend run build
+uvicorn voice_transcriber.server:app --reload --port 8000
 ```
 
-This writes everything the backend needs straight to `frontend/dist/` —
-the SPA shell, its hashed assets, and (via Vite's public-dir copy)
-`login.html`, `theme.css`, `theme-preboot.js` and `pcm-worklet.js`. Nothing
-else to copy, in Docker or out of it — the `Dockerfile`'s final stage just
-copies `frontend/dist/` from the build stage into the image at the same
-path.
+Open http://localhost:8000/home (or `/app`, `/admin`, `/translate`,
+`/recordings`, `/upload`, or `/login`). This writes everything the backend
+needs straight to
+`frontend/dist/` — the SPA shell, its hashed assets, and (via Vite's
+public-dir copy) `login.html`, `theme.css`, `theme-preboot.js` and
+`pcm-worklet.js`. Nothing else to copy, in Docker or out of it — the
+`Dockerfile`'s final stage just copies `frontend/dist/` from the build stage
+into the image at the same path.
+
+After any frontend change, rerun `npm --prefix frontend run build` and
+refresh the browser — there's no hot-reload, since Vite's dev server isn't
+used at all here.
 
 Frontend tests:
 
@@ -333,9 +320,9 @@ higher layers may import from lower ones, never the reverse.
 
 ```
 app/       Redux store + typed hooks (store.ts, hooks.ts)
-pages/     Route-level compositions - home, recorder, admin, translate.
-           Each is <page>/ui/ holding that page's own component tree
-           (nothing in here is imported by any other slice)
+pages/     Route-level compositions - home, recorder, admin, translate,
+           recordings, upload. Each is <page>/ui/ holding that page's own
+           component tree (nothing in here is imported by any other slice)
 widgets/   Composite UI used across multiple pages: app-layout, header, sidebar
 features/  User-facing interactions with their own state: auth, recorder,
            translate, transcribe (upload), theme
@@ -375,7 +362,7 @@ frontend/          Single source dir for every frontend file (Vite + React +
                      (still vanilla, pre-auth), theme.css/theme-preboot.js
                      (shared dark-mode styling/boot), pcm-worklet.js (mic
                      capture AudioWorklet, loaded by raw URL)
-  src/               React + Redux Toolkit source for all four post-login
+  src/               React + Redux Toolkit source for all six post-login
                      pages, in Feature-Sliced Design layers - see "Frontend
                      source layout" above
 ```

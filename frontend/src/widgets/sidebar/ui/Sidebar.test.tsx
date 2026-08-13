@@ -54,16 +54,20 @@ describe("Sidebar", () => {
     expect(screen.getByText("All Recordings")).toBeInTheDocument();
   });
 
-  it("Home, Recorder, Translate and Admin console are real client-side <Link>s (in-SPA routes)", () => {
+  it("Home, Recorder, Translate, Upload, My recordings and Admin console are real client-side <Link>s (in-SPA routes)", () => {
     renderSidebar(adminUser);
     const home = screen.getByRole("link", { name: "Home" });
     const recorder = screen.getByRole("link", { name: "Recorder" });
     const translate = screen.getByRole("link", { name: "Translate" });
+    const upload = screen.getByRole("link", { name: "Upload" });
+    const myRecordings = screen.getByRole("link", { name: "My recordings" });
     const adminConsole = screen.getByRole("link", { name: "Admin console" });
     expect(home).toHaveAttribute("href", "/home");
     expect(recorder).toHaveAttribute("href", "/app");
     expect(translate).toHaveAttribute("href", "/translate");
-    expect(adminConsole).toHaveAttribute("href", "/admin");
+    expect(upload).toHaveAttribute("href", "/upload");
+    expect(myRecordings).toHaveAttribute("href", "/recordings");
+    expect(adminConsole).toHaveAttribute("href", "/admin?tab=users");
   });
 
   it("clicking Recorder navigates client-side without touching window.location", async () => {
@@ -80,10 +84,10 @@ describe("Sidebar", () => {
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it("clicking Admin console navigates client-side without touching window.location", async () => {
+  it("clicking Admin console navigates client-side to /admin?tab=users, not a full reload", async () => {
     renderSidebar(adminUser);
     await userEvent.click(screen.getByRole("link", { name: "Admin console" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin");
+    expect(screen.getByTestId("location")).toHaveTextContent("/admin?tab=users");
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
@@ -99,21 +103,50 @@ describe("Sidebar", () => {
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it("Upload/My recordings navigate client-side via ?upload=1/?recordings=1, not a full reload", async () => {
+  it("clicking Upload navigates client-side to /upload without touching window.location", async () => {
     renderSidebar(regularUser);
-
-    await userEvent.click(screen.getByText("Upload"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/app?upload=1");
-
-    await userEvent.click(screen.getByText("My recordings"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/app?recordings=1");
-
+    await userEvent.click(screen.getByRole("link", { name: "Upload" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/upload");
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it("Upload opens in place when already on /admin, instead of defaulting to /app", async () => {
+  it("clicking My recordings navigates client-side to /recordings without touching window.location", async () => {
+    renderSidebar(regularUser);
+    await userEvent.click(screen.getByRole("link", { name: "My recordings" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/recordings");
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  it("highlights Upload as active when already on /upload", () => {
+    renderSidebar(regularUser, "/upload");
+    expect(screen.getByRole("link", { name: "Upload" }).className).toMatch(/active/);
+    expect(screen.getByRole("link", { name: "Recorder" }).className).not.toMatch(/active/);
+  });
+
+  it("highlights My recordings as active when already on /recordings", () => {
+    renderSidebar(regularUser, "/recordings");
+    expect(screen.getByRole("link", { name: "My recordings" }).className).toMatch(/active/);
+    expect(screen.getByRole("link", { name: "Recorder" }).className).not.toMatch(/active/);
+  });
+
+  it("highlights All Recordings, not Admin console, while AdminPage's Recordings tab is showing", () => {
+    render(
+      <MemoryRouter initialEntries={["/admin"]}>
+        <Sidebar
+          user={adminUser}
+          currentPath="/admin"
+          collapsed={false}
+          adminRecordingsTabActive
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Admin console" }).className).not.toMatch(/active/);
+    expect(screen.getByText("All Recordings").className).toMatch(/active/);
+  });
+
+  it("highlights Admin console, not All Recordings, when the Recordings tab isn't active", () => {
     renderSidebar(adminUser, "/admin");
-    await userEvent.click(screen.getByText("Upload"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin?upload=1");
+    expect(screen.getByRole("link", { name: "Admin console" }).className).toMatch(/active/);
+    expect(screen.getByText("All Recordings").className).toBeFalsy();
   });
 });

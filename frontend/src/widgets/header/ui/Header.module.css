@@ -65,8 +65,8 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--accent-soft);
+  color: var(--accent);
   display: grid;
   place-items: center;
   font-size: 11px;

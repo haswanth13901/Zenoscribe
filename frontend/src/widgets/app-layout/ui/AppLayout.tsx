@@ -8,6 +8,9 @@ import styles from "./AppLayout.module.css";
 interface AppLayoutProps {
   user: AuthUser;
   children: ReactNode;
+  // Forwarded to Sidebar so it can show All Recordings as active instead of
+  // Admin console while AdminPage's Recordings tab is showing.
+  adminRecordingsTabActive?: boolean;
 }
 
 const ICON_PANEL = (
@@ -30,7 +33,11 @@ const ICON_PANEL = (
 // injection: header full-width above, sidebar + main content side by side
 // below, with a collapse toggle absolutely positioned so it stays put and
 // clickable even when the sidebar collapses to zero width.
-export function AppLayout({ user, children }: AppLayoutProps): ReactElement {
+export function AppLayout({
+  user,
+  children,
+  adminRecordingsTabActive,
+}: AppLayoutProps): ReactElement {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
 
@@ -38,8 +45,16 @@ export function AppLayout({ user, children }: AppLayoutProps): ReactElement {
     <>
       <Header user={user} />
       <div id="appLayout" className={styles.layout}>
-        <Sidebar user={user} currentPath={location.pathname} collapsed={collapsed} />
-        <div id="appMainCol" className={styles.mainCol}>
+        <Sidebar
+          user={user}
+          currentPath={location.pathname}
+          collapsed={collapsed}
+          adminRecordingsTabActive={adminRecordingsTabActive}
+        />
+        <div
+          id="appMainCol"
+          className={`${styles.mainCol} ${collapsed ? styles.mainColCollapsed : ""}`}
+        >
           {children}
         </div>
         <button
