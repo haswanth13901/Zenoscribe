@@ -15,6 +15,14 @@ PRODUCTION = ENV == 'production'
 RECORDINGS = BASE_DIR / "recordings"
 RECORDINGS.mkdir(exist_ok=True)
 
+# Postgres connection string, e.g. postgresql://user:pass@host:port/dbname.
+# Production requires an explicit value; the dev default below matches the
+# `db` service in docker-compose.yml and must never be used in production.
+_database_url_env = os.environ.get('DATABASE_URL')
+if PRODUCTION and not _database_url_env:
+    raise RuntimeError("Missing DATABASE_URL in production environment")
+DATABASE_URL = _database_url_env or 'postgresql://zenoscribe:zenoscribe@localhost:5432/zenoscribe'
+
 # frontend/ is the single source dir for all frontend files; the backend
 # serves the Vite build output straight from frontend/dist/ (no separate
 # static/ copy) - see the repo README's "Frontend" section.

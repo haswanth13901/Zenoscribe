@@ -5,6 +5,21 @@
 # `docker compose run --rm web npm --prefix frontend run build`) so /home
 # serves a real build instead of a missing/stale one.
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zenoscribe
+      POSTGRES_PASSWORD: zenoscribe
+      POSTGRES_DB: zenoscribe
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zenoscribe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   web:
     build: .
     ports:
@@ -15,3 +30,9 @@ services:
       - ./:/app
     command: uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

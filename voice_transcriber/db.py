@@ -1,84 +1,65 @@
-"""SQLite storage for users and recording metadata.
+"""Postgres storage for users and recording metadata.
 
-Plain SQL throughout so this ports to Postgres by swapping the connection
-and changing '?' placeholders to '%s'.
+Plain SQL throughout via psycopg - no ORM. Schema lives in Alembic
+migrations (../alembic/versions/), not in this file.
 """
 
-import sqlite3
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
-DB_PATH = Path("app.db")
+from alembic import command
+from alembic.config import Config
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,
-    username      TEXT UNIQUE NOT NULL COLLATE NOCASE,
-    full_name     TEXT NOT NULL DEFAULT '',
-    email         TEXT NOT NULL DEFAULT '',
-    password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'user',
-    is_active     INTEGER NOT NULL DEFAULT 1,
-    created_at    TEXT NOT NULL,
-    created_by    TEXT,
-    last_login    TEXT,
-    last_seen     TEXT
-);
+from . import config as app_config
 
-CREATE TABLE IF NOT EXISTS recordings (
-    id          TEXT PRIMARY KEY,
-    user_id     TEXT NOT NULL,
-    wav_file    TEXT NOT NULL,
-    txt_file    TEXT NOT NULL,
-    started_at  TEXT NOT NULL,
-    duration    REAL NOT NULL DEFAULT 0,
-    turn_count  INTEGER NOT NULL DEFAULT 0,
-    preview     TEXT NOT NULL DEFAULT '',
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-CREATE TABLE IF NOT EXISTS failed_logins (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    username     TEXT NOT NULL,
-    ip           TEXT NOT NULL,
-    attempted_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_failed_logins_username_ip
-    ON failed_logins(username, ip, attempted_at);
-
-CREATE INDEX IF NOT EXISTS idx_rec_user ON recordings(user_id, started_at DESC);
-"""
+_pool: Optional[ConnectionPool] = None
 
 
-def connect():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+def _get_pool() -> ConnectionPool:
+    global _pool
+    if _pool is None:
+        _pool = ConnectionPool(
+            app_config.DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
+    return _pool
+
+
+def close_pool():
+    """Close the connection pool. Called from the app's shutdown hook."""
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
 
 
 def init():
-    conn = connect()
-    try:
-        conn.executescript(SCHEMA)
-        # Lightweight migration: add columns missing from older databases.
-        # ALTER TABLE ADD COLUMN is a no-op-safe way to evolve the schema
-        # without dropping data. Guarded so re-running init() is harmless.
-        existing = {
-            r["name"] for r in conn.execute("PRAGMA table_info(users)")
-        }
-        if "last_seen" not in existing:
-            conn.execute("ALTER TABLE users ADD COLUMN last_seen TEXT")
-        conn.commit()
-    finally:
-        conn.close()
+    """Apply all pending Alembic migrations. Idempotent - safe to call on
+    every startup, including against an already-up-to-date database."""
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    command.upgrade(cfg, "head")
 
 
 def _now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc)
+
+
+def _parse_ts(value):
+    """Accept a datetime or an ISO string. Naive strings are treated as UTC,
+    matching the old SQLite TEXT column's "store exactly what was given"
+    behavior instead of letting Postgres reinterpret via session timezone.
+    """
+    dt = value if isinstance(value, datetime) else datetime.fromisoformat(value)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def _clean_login_key(value: str) -> str:
@@ -86,41 +67,29 @@ def _clean_login_key(value: str) -> str:
 
 
 def record_failed_login(username: str, ip: str):
-    conn = connect()
-    try:
-        now = _now()
+    with _get_pool().connection() as conn:
         conn.execute(
-            "INSERT INTO failed_logins (username, ip, attempted_at) VALUES (?, ?, ?)",
-            (_clean_login_key(username), ip or "", now),
+            "INSERT INTO failed_logins (username, ip, attempted_at) VALUES (%s, %s, %s)",
+            (_clean_login_key(username), ip or "", _now()),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def clear_failed_logins(username: str, ip: str):
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         conn.execute(
-            "DELETE FROM failed_logins WHERE username = ? AND ip = ?",
+            "DELETE FROM failed_logins WHERE username = %s AND ip = %s",
             (_clean_login_key(username), ip or ""),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def count_recent_failed_logins(username: str, ip: str, window_sec: int):
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_sec)
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         return conn.execute(
             "SELECT COUNT(*) AS n FROM failed_logins"
-            " WHERE username = ? AND ip = ? AND attempted_at >= ?",
-            (_clean_login_key(username), ip or "", cutoff.isoformat()),
+            " WHERE username = %s AND ip = %s AND attempted_at >= %s",
+            (_clean_login_key(username), ip or "", cutoff),
         ).fetchone()["n"]
-    finally:
-        conn.close()
 
 
 def create_user(username, password_hash, full_name="", email="",
@@ -129,62 +98,46 @@ def create_user(username, password_hash, full_name="", email="",
 
     This makes test setup idempotent: if a user with the same username exists
     the record is updated with the supplied password and profile fields and
-    the existing id is returned instead of failing on UNIQUE constraint.
+    the existing id is returned instead of failing on the UNIQUE constraint.
     """
     uname = username.strip()
-    conn = connect()
-    try:
-        existing = conn.execute(
-            "SELECT id FROM users WHERE username = ?", (uname,)
-        ).fetchone()
-        if existing:
-            uid = existing["id"]
-            conn.execute(
-                """UPDATE users
-                   SET password_hash = ?, full_name = ?, email = ?, role = ?, is_active = 1, created_by = ?
-                   WHERE id = ?""",
-                (password_hash, full_name.strip(), email.strip(), role, created_by, uid),
-            )
-            conn.commit()
-            return uid
-        uid = uuid.uuid4().hex
-        conn.execute(
+    uid = uuid.uuid4().hex
+    with _get_pool().connection() as conn:
+        row = conn.execute(
             """INSERT INTO users
                (id, username, full_name, email, password_hash, role,
                 is_active, created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, TRUE, %s, %s)
+               ON CONFLICT (username) DO UPDATE
+               SET password_hash = EXCLUDED.password_hash,
+                   full_name = EXCLUDED.full_name,
+                   email = EXCLUDED.email,
+                   role = EXCLUDED.role,
+                   is_active = TRUE,
+                   created_by = EXCLUDED.created_by
+               RETURNING id""",
             (uid, uname, full_name.strip(), email.strip(),
              password_hash, role, _now(), created_by),
-        )
-        conn.commit()
-        return uid
-    finally:
-        conn.close()
-
-
-def get_user_by_username(username) -> Optional[sqlite3.Row]:
-    conn = connect()
-    try:
-        return conn.execute(
-            "SELECT * FROM users WHERE username = ?", (username.strip(),)
         ).fetchone()
-    finally:
-        conn.close()
+        return row["id"]
 
 
-def get_user(user_id) -> Optional[sqlite3.Row]:
-    conn = connect()
-    try:
+def get_user_by_username(username) -> Optional[dict]:
+    with _get_pool().connection() as conn:
         return conn.execute(
-            "SELECT * FROM users WHERE id = ?", (user_id,)
+            "SELECT * FROM users WHERE username = %s", (username.strip(),)
         ).fetchone()
-    finally:
-        conn.close()
+
+
+def get_user(user_id) -> Optional[dict]:
+    with _get_pool().connection() as conn:
+        return conn.execute(
+            "SELECT * FROM users WHERE id = %s", (user_id,)
+        ).fetchone()
 
 
 def list_users():
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         return conn.execute(
             """SELECT u.*, COUNT(r.id) AS recording_count
                FROM users u
@@ -192,79 +145,61 @@ def list_users():
                GROUP BY u.id
                ORDER BY u.created_at DESC"""
         ).fetchall()
-    finally:
-        conn.close()
 
 
 def touch_login(user_id):
-    conn = connect()
-    try:
-        now = _now()
+    with _get_pool().connection() as conn:
         # Logging in also counts as being seen.
+        now = _now()
         conn.execute(
-            "UPDATE users SET last_login = ?, last_seen = ? WHERE id = ?",
+            "UPDATE users SET last_login = %s, last_seen = %s WHERE id = %s",
             (now, now, user_id),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def touch_seen(user_id):
     """Bump last_seen on any authenticated activity."""
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         conn.execute(
-            "UPDATE users SET last_seen = ? WHERE id = ?", (_now(), user_id)
+            "UPDATE users SET last_seen = %s WHERE id = %s", (_now(), user_id)
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def set_active(user_id, active: bool):
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         if active:
             result = conn.execute(
-                "UPDATE users SET is_active = 1 WHERE id = ?",
+                "UPDATE users SET is_active = TRUE WHERE id = %s",
                 (user_id,),
             )
         else:
             result = conn.execute(
                 """
                 UPDATE users
-                SET is_active = 0
-                WHERE id = ?
+                SET is_active = FALSE
+                WHERE id = %s
                   AND NOT (
                       role = 'admin'
-                      AND is_active = 1
+                      AND is_active = TRUE
                       AND (
                           SELECT COUNT(*)
                           FROM users
                           WHERE role = 'admin'
-                            AND is_active = 1
+                            AND is_active = TRUE
                       ) = 1
                   )
                 """,
                 (user_id,),
             )
-        conn.commit()
         return result.rowcount
-    finally:
-        conn.close()
 
 
 def set_password(user_id, password_hash):
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         conn.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
+            "UPDATE users SET password_hash = %s WHERE id = %s",
             (password_hash, user_id),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def delete_user(user_id):
@@ -272,132 +207,111 @@ def delete_user(user_id):
 
     The delete is conditional to avoid removing the last active admin.
     """
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         rows = conn.execute(
-            "SELECT wav_file, txt_file FROM recordings WHERE user_id = ?",
+            "SELECT wav_file, txt_file FROM recordings WHERE user_id = %s",
             (user_id,),
         ).fetchall()
         files = [(r["wav_file"], r["txt_file"]) for r in rows]
         result = conn.execute(
             """
             DELETE FROM users
-            WHERE id = ?
+            WHERE id = %s
               AND NOT (
                   role = 'admin'
-                  AND is_active = 1
+                  AND is_active = TRUE
                   AND (
                       SELECT COUNT(*)
                       FROM users
                       WHERE role = 'admin'
-                        AND is_active = 1
+                        AND is_active = TRUE
                   ) = 1
               )
             """,
             (user_id,),
         )
-        conn.commit()
         if result.rowcount == 0:
             return None
         return files
-    finally:
-        conn.close()
 
 
 def count_admins():
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         return conn.execute(
-            "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1"
+            "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = TRUE"
         ).fetchone()["n"]
-    finally:
-        conn.close()
 
 
 def add_recording(rec_id, user_id, wav_file, txt_file, started_at,
                   duration, turn_count, preview):
     """Insert or update a recording entry (idempotent on rec_id)."""
-    conn = connect()
-    try:
-        existing = conn.execute(
-            "SELECT id FROM recordings WHERE id = ?", (rec_id,)
-        ).fetchone()
-        if existing:
-            conn.execute(
-                """UPDATE recordings
-                   SET user_id = ?, wav_file = ?, txt_file = ?, started_at = ?, duration = ?, turn_count = ?, preview = ?
-                   WHERE id = ?""",
-                (user_id, wav_file, txt_file, started_at, duration, turn_count, preview, rec_id),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO recordings
-                   (id, user_id, wav_file, txt_file, started_at,
-                    duration, turn_count, preview)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (rec_id, user_id, wav_file, txt_file, started_at,
-                 duration, turn_count, preview),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    with _get_pool().connection() as conn:
+        conn.execute(
+            """INSERT INTO recordings
+               (id, user_id, wav_file, txt_file, started_at,
+                duration, turn_count, preview)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE
+               SET user_id = EXCLUDED.user_id,
+                   wav_file = EXCLUDED.wav_file,
+                   txt_file = EXCLUDED.txt_file,
+                   started_at = EXCLUDED.started_at,
+                   duration = EXCLUDED.duration,
+                   turn_count = EXCLUDED.turn_count,
+                   preview = EXCLUDED.preview""",
+            (rec_id, user_id, wav_file, txt_file, _parse_ts(started_at),
+             duration, turn_count, preview),
+        )
 
 
 def list_recordings(user_id=None, date_from=None, date_to=None, limit=200):
     """user_id=None returns every recording (admin view).
 
-    date_from / date_to are ISO date strings (YYYY-MM-DD). The range is
-    inclusive of both ends; date_to is matched up to the end of that day.
+    date_from / date_to are ISO date strings (YYYY-MM-DD), interpreted as
+    UTC calendar days. The range is inclusive of both ends.
     """
     where = []
     params = []
     if user_id:
-        where.append("r.user_id = ?")
+        where.append("r.user_id = %s")
         params.append(user_id)
     if date_from:
-        where.append("r.started_at >= ?")
-        params.append(f"{date_from}T00:00:00")
+        where.append("r.started_at >= %s")
+        params.append(datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc))
     if date_to:
-        where.append("r.started_at <= ?")
-        params.append(f"{date_to}T23:59:59.999999")
+        where.append("r.started_at < %s")
+        params.append(
+            datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            + timedelta(days=1)
+        )
 
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     params.append(limit)
 
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         return conn.execute(
             f"""SELECT r.*, u.username
                 FROM recordings r JOIN users u ON u.id = r.user_id
                 {clause}
-                ORDER BY r.started_at DESC LIMIT ?""",
+                ORDER BY r.started_at DESC LIMIT %s""",
             params,
         ).fetchall()
-    finally:
-        conn.close()
 
 
-def get_recording(rec_id) -> Optional[sqlite3.Row]:
-    conn = connect()
-    try:
+def get_recording(rec_id) -> Optional[dict]:
+    with _get_pool().connection() as conn:
         return conn.execute(
             """SELECT r.*, u.username
                FROM recordings r JOIN users u ON u.id = r.user_id
-               WHERE r.id = ?""",
+               WHERE r.id = %s""",
             (rec_id,),
         ).fetchone()
-    finally:
-        conn.close()
 
 
 def delete_recording(rec_id):
-    conn = connect()
-    try:
+    with _get_pool().connection() as conn:
         row = conn.execute(
-            "SELECT wav_file, txt_file FROM recordings WHERE id = ?", (rec_id,)
+            "SELECT wav_file, txt_file FROM recordings WHERE id = %s", (rec_id,)
         ).fetchone()
-        conn.execute("DELETE FROM recordings WHERE id = ?", (rec_id,))
-        conn.commit()
+        conn.execute("DELETE FROM recordings WHERE id = %s", (rec_id,))
         return (row["wav_file"], row["txt_file"]) if row else None
-    finally:
-        conn.close()

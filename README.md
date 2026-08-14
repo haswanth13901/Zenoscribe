@@ -38,6 +38,7 @@ Prerequisites
 - Python 3.10 or later
 - Git
 - A modern browser (Chrome/Edge/Firefox)
+- Postgres (local install, or via `docker compose up db`)
 
 1) Install dependencies
 
@@ -117,6 +118,17 @@ development and in any deployed environment. When enabled, calls to
 `/internal/test-hook/transcribe_mode` must include a matching
 `X-TEST-HOOK-SECRET` header and an admin JWT, and are accepted only from
 localhost unless `RESTRICT_TEST_HOOK_TO_LOCALHOST=false`.
+
+2b) Start Postgres
+
+```bash
+docker compose up -d db
+```
+
+Or point `DATABASE_URL` in `.env` at a Postgres instance you already have
+running. The app applies Alembic migrations automatically on startup (see
+"Data & storage" below), so no separate migration step is needed for a fresh
+database.
 
 3) Start the app (development)
 
@@ -352,7 +364,7 @@ config.py         Paths + transcription tuning constants
 transcribe.py     Realtime engine: Soniox WebSocket bridge, turn detection
 routes_api.py     Auth, user administration, recording access
 auth.py           JWT, bcrypt, role guards
-db.py             SQLite storage (users, recordings, presence)
+db.py             Postgres storage (users, recordings, presence)
 soniox_client.py  Soniox REST + WebSocket config, speaker labeling
 frontend/          Single source dir for every frontend file (Vite + React +
                    TypeScript + Redux Toolkit). Builds to frontend/dist/
@@ -403,13 +415,19 @@ All in `config.py`:
 
 ## Data & storage
 
-- **`app.db`** — SQLite: users, recording metadata, presence. Created on first
-  run; schema migrations are applied automatically at startup.
+- **Postgres** — users, recording metadata, presence. Connection configured via
+  `DATABASE_URL` (see `.env.example`); for local dev this points at the `db`
+  service in `docker-compose.yml`. Schema is managed with
+  [Alembic](https://alembic.sqlalchemy.org/) migrations in `alembic/versions/`;
+  `db.init()` runs `alembic upgrade head` automatically at startup, so a fresh
+  database is migrated on first run same as before. To manage migrations
+  directly: `alembic upgrade head`, `alembic revision -m "..."`.
 - **`recordings/`** — saved `.wav` and `.txt` files. Deliberately *not* served
   as static files; all access goes through authenticated, ownership-checked API
   routes.
 
-Neither is committed to git (see `.gitignore`).
+`recordings/` is not committed to git (see `.gitignore`); neither is `.env`
+(which holds `DATABASE_URL` and other secrets).
 
 ## Security notes
 

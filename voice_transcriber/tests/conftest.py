@@ -1,11 +1,15 @@
 """Shared fixtures for the voice_transcriber test suite.
 
-Isolation strategy: every test that touches the database or the recordings
-directory gets a private SQLite file and a private recordings directory via
-monkeypatch, so the real dev app.db and the real voice_transcriber/recordings/
-directory are never touched by a test run. db.DB_PATH and config.RECORDINGS
-are both read fresh at call time (not captured at import time anywhere in the
-app), which is what makes monkeypatching them here sufficient on its own.
+Isolation strategy: every test that touches the database gets a private
+Postgres *schema* on the shared dev/CI database (Postgres has no equivalent
+of SQLite's "point at a fresh file" trick). A unique `test_<uuid>` schema is
+created, Alembic migrations are run against it via a search_path-scoped
+DSN, and it's dropped again on teardown - so tests never see each other's
+rows and never touch a real `public` schema's data. `config.DATABASE_URL` is
+read fresh by db.py on every pool creation (not captured at import time),
+which is what makes monkeypatching it here sufficient on its own. The
+recordings directory is isolated the same way it always was, via
+`config.RECORDINGS` monkeypatching.
 """
 import io
 import os
@@ -13,10 +17,13 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+import psycopg
 import pytest
 import requests
 from fastapi.testclient import TestClient
@@ -29,11 +36,48 @@ from voice_transcriber import auth, config, db, soniox_client  # noqa: E402
 from voice_transcriber.server import app  # noqa: E402
 
 
+def _scoped_dsn(base_url: str, schema: str) -> str:
+    """base_url with a libpq `options=-c search_path=<schema>` param added,
+    so any connection made with it (in-process or a subprocess) resolves
+    unqualified table names into that schema alone. Deliberately excludes
+    `public` - the initial migration references the `citext` extension type
+    fully-qualified (public.citext) for exactly this reason, so that an
+    unqualified `alembic_version` or `users` lookup can never fall through
+    to (or silently write into) the real `public` schema when a test schema
+    doesn't have its own copy yet."""
+    parts = urlsplit(base_url)
+    query = dict(parse_qsl(parts.query))
+    query["options"] = f"-c search_path={schema}"
+    new_query = urlencode(query, quote_via=quote)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
+def _create_test_schema(base_url: str) -> str:
+    schema = f"test_{uuid.uuid4().hex}"
+    with psycopg.connect(base_url, autocommit=True) as conn:
+        conn.execute(f'CREATE SCHEMA "{schema}"')
+    return schema
+
+
+def _drop_test_schema(base_url: str, schema: str):
+    with psycopg.connect(base_url, autocommit=True) as conn:
+        conn.execute(f'DROP SCHEMA "{schema}" CASCADE')
+
+
 @pytest.fixture
-def isolated_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
-    db.init()
-    yield db
+def isolated_db(monkeypatch):
+    base_url = config.DATABASE_URL
+    schema = _create_test_schema(base_url)
+    try:
+        monkeypatch.setattr(config, "DATABASE_URL", _scoped_dsn(base_url, schema))
+        monkeypatch.setattr(db, "_pool", None)
+        db.init()
+        yield db
+    finally:
+        if db._pool is not None:
+            db._pool.close()
+            db._pool = None
+        _drop_test_schema(base_url, schema)
 
 
 @pytest.fixture
@@ -127,66 +171,77 @@ def live_server(tmp_path, monkeypatch):
     """Launch a real uvicorn subprocess on an ephemeral port with test hooks
     enabled, for the one true black-box (Playwright) integration test.
 
-    The admin user is created in the DB *before* the subprocess is launched
-    (matching db.DB_PATH == tmp_path/"app.db", which the subprocess will also
-    resolve to since it's launched with cwd=tmp_path) so there's no race with
-    the subprocess's own startup event, which just finds the schema/admin
-    already present (db.init()/ensure_seed_admin() are both idempotent).
+    The admin user is created in the DB *before* the subprocess is launched,
+    against a schema-scoped DATABASE_URL that's also passed to the subprocess
+    via its env (a separate process can't see this process's monkeypatches),
+    so there's no race with the subprocess's own startup event, which just
+    finds the schema/admin already present (db.init()/ensure_seed_admin()
+    are both idempotent).
 
     PYTHONPATH is set explicitly to the repo root since the subprocess's cwd
     is tmp_path, not the repo root, so `import voice_transcriber` inside it
-    needs help finding the package. config.STATIC_DIR is an absolute path,
-    so page/static serving is unaffected by cwd either way.
+    needs help finding the package.
     """
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "app.db")
-    db.init()
-    admin_username = "e2e_admin"
-    admin_password = "E2EPass123!"
-    db.create_user(
-        admin_username, auth.hash_password(admin_password),
-        full_name="E2E Admin", role="admin",
-    )
-
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
-
-    hook_secret = "e2e-secret"
-    env = os.environ.copy()
-    env["ALLOW_TEST_HOOKS"] = "true"
-    env["TEST_HOOK_SECRET"] = hook_secret
-    env["PYTHONPATH"] = str(REPO_ROOT)
-    # Force an invalid Soniox key regardless of what the developer's own
-    # .env has configured (os.environ.copy() would otherwise inherit a real
-    # one). No `integration`-marked test should depend on - or spend quota
-    # against - the real Soniox API; that's what the separately-gated
-    # `real_network` marker (RUN_REAL_SONIOX_TESTS=true) is for. Tests that
-    # need Soniox behavior without a real key use the ALLOW_TEST_HOOKS fake
-    # mode above instead.
-    env["SONIOX_API_KEY"] = "test-invalid-soniox-key"
-
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "voice_transcriber.server:app",
-         "--host", "127.0.0.1", "--port", str(port)],
-        cwd=tmp_path, env=env,
-    )
-    base_url = f"http://127.0.0.1:{port}"
+    base_url_db = config.DATABASE_URL
+    schema = _create_test_schema(base_url_db)
+    scoped_url = _scoped_dsn(base_url_db, schema)
     try:
-        for _ in range(60):
-            try:
-                if requests.get(base_url + "/", timeout=2).status_code == 200:
-                    break
-            except requests.RequestException:
-                pass
-            time.sleep(0.5)
-        else:
+        monkeypatch.setattr(config, "DATABASE_URL", scoped_url)
+        monkeypatch.setattr(db, "_pool", None)
+        db.init()
+        admin_username = "e2e_admin"
+        admin_password = "E2EPass123!"
+        db.create_user(
+            admin_username, auth.hash_password(admin_password),
+            full_name="E2E Admin", role="admin",
+        )
+        if db._pool is not None:
+            db._pool.close()
+            db._pool = None
+
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        hook_secret = "e2e-secret"
+        env = os.environ.copy()
+        env["DATABASE_URL"] = scoped_url
+        env["ALLOW_TEST_HOOKS"] = "true"
+        env["TEST_HOOK_SECRET"] = hook_secret
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        # Force an invalid Soniox key regardless of what the developer's own
+        # .env has configured (os.environ.copy() would otherwise inherit a real
+        # one). No `integration`-marked test should depend on - or spend quota
+        # against - the real Soniox API; that's what the separately-gated
+        # `real_network` marker (RUN_REAL_SONIOX_TESTS=true) is for. Tests that
+        # need Soniox behavior without a real key use the ALLOW_TEST_HOOKS fake
+        # mode above instead.
+        env["SONIOX_API_KEY"] = "test-invalid-soniox-key"
+
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "voice_transcriber.server:app",
+             "--host", "127.0.0.1", "--port", str(port)],
+            cwd=tmp_path, env=env,
+        )
+        base_url = f"http://127.0.0.1:{port}"
+        try:
+            for _ in range(60):
+                try:
+                    if requests.get(base_url + "/", timeout=2).status_code == 200:
+                        break
+                except requests.RequestException:
+                    pass
+                time.sleep(0.5)
+            else:
+                proc.kill()
+                pytest.fail("live_server did not become healthy in time")
+            yield LiveServer(base_url, hook_secret, admin_username, admin_password)
+        finally:
             proc.kill()
-            pytest.fail("live_server did not become healthy in time")
-        yield LiveServer(base_url, hook_secret, admin_username, admin_password)
+            proc.wait(timeout=10)
     finally:
-        proc.kill()
-        proc.wait(timeout=10)
+        _drop_test_schema(base_url_db, schema)
 
 
 def seed_auth_script(token, user):

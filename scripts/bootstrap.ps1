@@ -26,3 +26,4 @@ try {
 }
 
 Write-Host "[bootstrap] Done. To use the venv interactively run: .\\.venv\\Scripts\\Activate.ps1"
+Write-Host "[bootstrap] Note: the app and its tests need a reachable Postgres (DATABASE_URL) - run 'docker compose up -d db' or point DATABASE_URL at your own instance."

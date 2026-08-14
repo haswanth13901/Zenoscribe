@@ -24,3 +24,4 @@ else
 fi
 
 echo "[bootstrap] Done. Activate the venv with: source .venv/bin/activate"
+echo "[bootstrap] Note: the app and its tests need a reachable Postgres (DATABASE_URL) - run 'docker compose up -d db' or point DATABASE_URL at your own instance."

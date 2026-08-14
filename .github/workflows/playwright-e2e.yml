@@ -17,12 +17,27 @@ on:
 jobs:
   e2e-playwright:
     runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: zenoscribe
+          POSTGRES_PASSWORD: zenoscribe
+          POSTGRES_DB: zenoscribe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zenoscribe"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       ALLOW_TEST_HOOKS: 'true'
       # Provide TEST_HOOK_SECRET via repository/organization secrets. The test
       # sets its own value internally, but exporting it here keeps the job's
       # environment consistent if the test ever reads it from the environment.
       TEST_HOOK_SECRET: ${{ secrets.TEST_HOOK_SECRET }}
+      DATABASE_URL: postgresql://zenoscribe:zenoscribe@localhost:5432/zenoscribe
 
     steps:
       - name: Checkout

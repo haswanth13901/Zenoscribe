@@ -58,6 +58,11 @@ def _startup():
             log.info("Created admin '%s' from ADMIN_PASSWORD", username)
 
 
+@app.on_event("shutdown")
+def _shutdown():
+    db.close_pool()
+
+
 @app.get("/")
 async def root():
     # login.html is sourced from frontend/public/ (single source of truth
