@@ -10,6 +10,25 @@ ASYNC_MODEL = "stt-async-v5"
 RT_MODEL = "stt-rt-v5"
 BATCH_POLL_TIMEOUT = 600
 
+# Bounds for the optional speaker-count hint. Soniox diarizes without it, but
+# telling it how many speakers to expect improves separation when it's known
+# up front (e.g. a fixed meeting size). Out-of-range or unparseable values
+# are dropped rather than sent upstream.
+MIN_SPEAKERS = 1
+MAX_SPEAKERS = 10
+
+
+def clamp_num_speakers(num_speakers):
+    if num_speakers is None:
+        return None
+    try:
+        n = int(num_speakers)
+    except (TypeError, ValueError):
+        return None
+    if n < MIN_SPEAKERS or n > MAX_SPEAKERS:
+        return None
+    return n
+
 # Network timeouts (in seconds)
 # Allow overriding from environment for testing/CI (e.g. use a small value to fail fast)
 UPLOAD_TIMEOUT = int(os.environ.get('SONIOX_UPLOAD_TIMEOUT', '30'))
@@ -72,7 +91,7 @@ class SpeakerLabeler:
         self.last_label = None
 
 
-def rt_config(sample_rate=16000, language_hints=None):
+def rt_config(sample_rate=16000, language_hints=None, num_speakers=None):
     cfg = {
         "api_key": get_api_key(),
         "model": RT_MODEL,
@@ -83,6 +102,9 @@ def rt_config(sample_rate=16000, language_hints=None):
     }
     if language_hints:
         cfg["language_hints"] = language_hints
+    num_speakers = clamp_num_speakers(num_speakers)
+    if num_speakers:
+        cfg["num_speakers"] = num_speakers
     return cfg
 
 
@@ -92,7 +114,8 @@ TTS_SAMPLE_RATE = 24000  # Soniox TTS default for pcm_s16le
 
 
 def translate_stt_config(mode, target_language=None, language_a=None,
-                         language_b=None, sample_rate=16000, diarize=False):
+                         language_b=None, sample_rate=16000, diarize=False,
+                         num_speakers=None):
     """STT config with a translation block.
 
     mode 'one_way': detected speech -> target_language.
@@ -100,7 +123,8 @@ def translate_stt_config(mode, target_language=None, language_a=None,
 
     Endpoint detection is on so each utterance closes promptly, which is what
     lets the TTS side speak one sentence at a time. diarize adds per-token
-    speaker ids, used to label who said what in the captions.
+    speaker ids, used to label who said what in the captions. num_speakers
+    is only meaningful alongside diarize.
     """
     cfg = {
         "api_key": get_api_key(),
@@ -113,6 +137,9 @@ def translate_stt_config(mode, target_language=None, language_a=None,
     }
     if diarize:
         cfg["enable_speaker_diarization"] = True
+        num_speakers = clamp_num_speakers(num_speakers)
+        if num_speakers:
+            cfg["num_speakers"] = num_speakers
     if mode == "one_way":
         cfg["translation"] = {
             "type": "one_way",
@@ -155,7 +182,7 @@ def get_test_fake_mode():
     return _TEST_FAKE_MODE
 
 
-def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, language_hints=("en",), target_language=None):
+def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, language_hints=("en",), target_language=None, num_speakers=None):
     """Upload a file, wait for the job, return merged speaker turns.
 
     If target_language is provided, request a one-way translation from Soniox
@@ -194,6 +221,9 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
         "model": ASYNC_MODEL,
         "enable_speaker_diarization": True,
     }
+    num_speakers = clamp_num_speakers(num_speakers)
+    if num_speakers:
+        body["num_speakers"] = num_speakers
     if language_hints:
         body["language_hints"] = list(language_hints)
     if target_language:

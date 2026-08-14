@@ -19,6 +19,7 @@ function buildHello(token: string | null, settings: TranslateSettings) {
     speak: settings.speak,
     voice: settings.voice,
     diarize: settings.diarize,
+    num_speakers: settings.numSpeakers,
     mode: settings.mode,
   };
   if (settings.mode === "one_way") {

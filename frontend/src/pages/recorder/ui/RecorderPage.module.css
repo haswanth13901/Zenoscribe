@@ -34,6 +34,23 @@
   }
 }
 
+.speakersField {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.speakersField input {
+  width: 52px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  border: 1px solid var(--field-border);
+}
+
 .toggleBtn.rec {
   background: var(--rec);
   border-color: var(--rec);

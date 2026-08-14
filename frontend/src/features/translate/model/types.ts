@@ -34,6 +34,9 @@ export interface TranslateSettings {
   speak: boolean;
   voice: string;
   diarize: boolean;
+  /** Optional hint for how many distinct voices to expect; only sent to
+   * Soniox when diarize is on. */
+  numSpeakers?: number;
   /** one_way only. */
   targetLanguage: string;
   /** two_way only. */

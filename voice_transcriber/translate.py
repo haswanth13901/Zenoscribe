@@ -64,6 +64,7 @@ async def translate(client: WebSocket):
     speak = bool(hello.get("speak", True))
     voice = hello.get("voice", "Maya")
     diarize = bool(hello.get("diarize", False))
+    num_speakers = hello.get("num_speakers")
 
     if mode == "one_way":
         target = hello.get("target_language", "es")
@@ -71,7 +72,7 @@ async def translate(client: WebSocket):
             await _fail(client, "Unsupported target language")
             return
         stt_cfg = sx.translate_stt_config(
-            "one_way", target_language=target, diarize=diarize
+            "one_way", target_language=target, diarize=diarize, num_speakers=num_speakers
         )
         # In one-way, everything is spoken in the single target language.
         tts_lang_for = lambda tok_lang: target
@@ -87,7 +88,8 @@ async def translate(client: WebSocket):
             await _fail(client, "Unsupported language pair")
             return
         stt_cfg = sx.translate_stt_config(
-            "two_way", language_a=lang_a, language_b=lang_b, diarize=diarize
+            "two_way", language_a=lang_a, language_b=lang_b, diarize=diarize,
+            num_speakers=num_speakers
         )
         # In two-way, a translated token's own language field tells us which
         # voice language to speak it in.

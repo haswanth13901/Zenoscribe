@@ -141,19 +141,23 @@ async def current_admin(user=Depends(current_user)):
     return user
 
 
-async def user_from_ws(websocket: WebSocket) -> object:
+async def user_from_ws(websocket: WebSocket) -> tuple:
     """Authenticate a WebSocket after the connection opens.
 
     WebSockets cannot send Authorization headers from the browser, so the
     client sends a short-lived auth frame after the socket opens instead of
-    embedding the JWT in the URL.
+    embedding the JWT in the URL. Returns (user, payload) so callers can read
+    other fields (e.g. num_speakers) carried on the same frame; payload is
+    always a dict, even on failure.
     """
     try:
         payload = await websocket.receive_json()
     except Exception:
-        return None
-    token = payload.get("token") if isinstance(payload, dict) else None
-    return user_from_token(token) if token else None
+        return None, {}
+    if not isinstance(payload, dict):
+        return None, {}
+    token = payload.get("token")
+    return (user_from_token(token) if token else None), payload
 
 
 def ensure_seed_admin():

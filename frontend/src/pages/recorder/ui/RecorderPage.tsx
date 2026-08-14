@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { useAppSelector } from "@/app/hooks";
 import { AppLayout } from "@/widgets/app-layout/ui/AppLayout";
 import { useRecorderConnection } from "@/features/recorder/model/useRecorderConnection";
@@ -11,15 +11,18 @@ import styles from "./RecorderPage.module.css";
 export function RecorderPage(): ReactElement {
   const user = useAppSelector((s) => s.auth.user)!;
   const { state, start, stop, clear } = useRecorderConnection();
+  const [numSpeakers, setNumSpeakers] = useState("");
 
   const isListening = state.status === "listening";
   const isBusy = state.status === "connecting" || state.status === "authenticating";
+  const controlsLocked = isListening || isBusy;
 
   function handleToggle() {
     if (isListening) {
       stop();
     } else {
-      start();
+      const n = parseInt(numSpeakers, 10);
+      start(Number.isFinite(n) && n > 0 ? n : undefined);
     }
   }
 
@@ -40,6 +43,19 @@ export function RecorderPage(): ReactElement {
         >
           {state.statusMessage === "idle" ? "" : state.statusMessage}
         </span>
+        <label className={styles.speakersField} title="Optional hint for how many distinct voices to expect">
+          Speakers
+          <input
+            type="number"
+            data-testid="recorder-num-speakers"
+            min={1}
+            max={10}
+            placeholder="auto"
+            value={numSpeakers}
+            disabled={controlsLocked}
+            onChange={(e) => setNumSpeakers(e.target.value)}
+          />
+        </label>
         <button
           type="button"
           data-testid="recorder-toggle"

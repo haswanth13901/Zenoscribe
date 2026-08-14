@@ -40,12 +40,13 @@ async def live(client: WebSocket):
     # Browsers can't set Authorization headers on a WebSocket. The client sends
     # a one-time auth frame after the socket opens so the JWT never appears in
     # the request URL/query string.
-    ws_user = await auth.user_from_ws(client)
+    ws_user, hello = await auth.user_from_ws(client)
     if not ws_user:
         await client.close(code=4401)
         return
     user_id = ws_user["id"]
     username = ws_user["username"]
+    num_speakers = hello.get("num_speakers")
     await client.send_json({"type": "ready"})
     labeler = sx.SpeakerLabeler()
     loop = asyncio.get_event_loop()
@@ -171,7 +172,9 @@ async def live(client: WebSocket):
 
     try:
         async with connect(sx.WS_URL, max_size=None) as upstream:
-            await upstream.send(json.dumps(sx.rt_config(language_hints=config.LANGUAGE_HINTS)))
+            await upstream.send(json.dumps(
+                sx.rt_config(language_hints=config.LANGUAGE_HINTS, num_speakers=num_speakers)
+            ))
             log.info("session %s started", session)
 
             async def pump_audio():

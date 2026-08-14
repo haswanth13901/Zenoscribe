@@ -53,7 +53,7 @@ export function useRecorderConnection() {
     teardown();
   }, [teardown]);
 
-  const start = useCallback(() => {
+  const start = useCallback((numSpeakers?: number) => {
     if (activeRef.current) return;
     activeRef.current = true;
     dispatch({ type: "start-requested" });
@@ -82,7 +82,7 @@ export function useRecorderConnection() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: "auth", token }));
+        ws.send(JSON.stringify({ type: "auth", token, num_speakers: numSpeakers }));
         dispatch({ type: "ws-open" });
       };
 

@@ -44,6 +44,7 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [targetLanguage, setTargetLanguage] = useState("en");
+  const [numSpeakers, setNumSpeakers] = useState("");
   const [transcribeResult, setTranscribeResult] = useState<string | null>(null);
   const [translateResult, setTranslateResult] = useState<string | null>(null);
 
@@ -64,11 +65,16 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
     setTranslateResult(null);
   }
 
+  function parsedNumSpeakers(): number | undefined {
+    const n = parseInt(numSpeakers, 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+
   async function doTranscribe() {
     if (!file) return;
     setTranscribeResult(null);
     try {
-      const json = await transcribe({ file }).unwrap();
+      const json = await transcribe({ file, numSpeakers: parsedNumSpeakers() }).unwrap();
       setTranscribeResult(joinTurns(json.turns) || "(no transcription)");
     } catch {
       // transcribeState.isError renders the error below.
@@ -79,7 +85,11 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
     if (!file) return;
     setTranslateResult(null);
     try {
-      const json = await transcribeAndTranslate({ file, targetLanguage }).unwrap();
+      const json = await transcribeAndTranslate({
+        file,
+        targetLanguage,
+        numSpeakers: parsedNumSpeakers(),
+      }).unwrap();
       setTranslateResult(joinTurns(json.turns) || "(no translation)");
     } catch {
       // translateState.isError renders the error below.
@@ -127,6 +137,19 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
                 </option>
               ))}
             </select>
+          </div>
+          <div className={styles.speakersField} title="Optional hint for how many distinct voices to expect">
+            <label htmlFor="upload-num-speakers">Speakers</label>
+            <input
+              id="upload-num-speakers"
+              type="number"
+              data-testid="upload-num-speakers"
+              min={1}
+              max={10}
+              placeholder="auto"
+              value={numSpeakers}
+              onChange={(e) => setNumSpeakers(e.target.value)}
+            />
           </div>
           <div>
             <button

@@ -36,6 +36,7 @@ export function TranslatePage(): ReactElement {
   const [voice, setVoice] = useState("");
   const [speak, setSpeak] = useState(true);
   const [diarize, setDiarize] = useState(false);
+  const [numSpeakers, setNumSpeakers] = useState("");
   const [view, setView] = useState<ViewMode>(readStoredView);
 
   const effectiveVoice = voice || voices[0] || "Maya";
@@ -60,7 +61,17 @@ export function TranslatePage(): ReactElement {
   }
 
   function currentSettings(): TranslateSettings {
-    return { mode, speak, voice: effectiveVoice, diarize, targetLanguage, languageA, languageB };
+    const n = parseInt(numSpeakers, 10);
+    return {
+      mode,
+      speak,
+      voice: effectiveVoice,
+      diarize,
+      numSpeakers: Number.isFinite(n) && n > 0 ? n : undefined,
+      targetLanguage,
+      languageA,
+      languageB,
+    };
   }
 
   function handleToggle() {
@@ -219,6 +230,22 @@ export function TranslatePage(): ReactElement {
             />
             Label speakers
           </label>
+          {diarize && (
+            <div className={styles.field} title="Optional hint for how many distinct voices to expect">
+              <label htmlFor="translate-num-speakers">Speakers</label>
+              <input
+                id="translate-num-speakers"
+                type="number"
+                data-testid="translate-num-speakers"
+                min={1}
+                max={10}
+                placeholder="auto"
+                value={numSpeakers}
+                disabled={controlsLocked}
+                onChange={(e) => setNumSpeakers(e.target.value)}
+              />
+            </div>
+          )}
 
           <div className={styles.viewSwitch}>
             <button

@@ -11,7 +11,7 @@ import os
 import tempfile
 
 from fastapi import (
-    APIRouter, Depends, File, HTTPException, Request, UploadFile, status,
+    APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status,
 )
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -312,6 +312,7 @@ async def remove_recording(rec_id: str, user=Depends(auth.current_user)):
 async def transcribe_upload(
     request: Request,
     file: UploadFile = File(...),
+    num_speakers: int = Form(None),
     _=Depends(auth.current_user),
 ):
     """Batch endpoint - upload a wav/mp3, get turns back."""
@@ -347,7 +348,7 @@ async def transcribe_upload(
                 tmp.write(chunk)
 
         try:
-            turns = await asyncio.to_thread(sx.transcribe_file, path)
+            turns = await asyncio.to_thread(sx.transcribe_file, path, num_speakers=num_speakers)
             return {"turns": turns}
         except TimeoutError as e:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")
@@ -369,6 +370,7 @@ async def transcribe_and_translate(
     request: Request,
     file: UploadFile = File(...),
     target_language: str = None,
+    num_speakers: int = Form(None),
     _=Depends(auth.current_user),
 ):
     """Upload audio, run STT and server-side one-way translation (Soniox), and
@@ -406,7 +408,9 @@ async def transcribe_and_translate(
                 tmp.write(chunk)
 
         try:
-            turns = await asyncio.to_thread(sx.transcribe_file, path, target_language=target_language)
+            turns = await asyncio.to_thread(
+                sx.transcribe_file, path, target_language=target_language, num_speakers=num_speakers
+            )
             return {"turns": turns}
         except TimeoutError as e:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")

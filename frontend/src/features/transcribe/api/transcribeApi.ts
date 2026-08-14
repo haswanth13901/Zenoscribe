@@ -16,14 +16,17 @@ export interface TranscribeTranslateArgs {
    * "Transcribe" button always posts to /transcribe/translate). Ported
    * as-is, not "fixed" - this is deliberate reuse, not a bug. */
   targetLanguage?: string;
+  /** Optional hint for how many distinct voices to expect. */
+  numSpeakers?: number;
 }
 
 export const transcribeApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     transcribeTranslate: builder.mutation<TranscribeResponse, TranscribeTranslateArgs>({
-      query: ({ file, targetLanguage }) => {
+      query: ({ file, targetLanguage, numSpeakers }) => {
         const formData = new FormData();
         formData.append("file", file, file.name);
+        if (numSpeakers) formData.append("num_speakers", String(numSpeakers));
         const qs = targetLanguage ? `?target_language=${encodeURIComponent(targetLanguage)}` : "";
         return { url: `/transcribe/translate${qs}`, method: "POST", body: formData };
       },
