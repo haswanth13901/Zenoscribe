@@ -246,6 +246,37 @@ These quickchecks are intended for development and CI; do not enable debug
 logging or test hooks in production. See the Production section above for
 secure deployment requirements.
 
+### VS Code performance (optional)
+
+`.vscode/` is gitignored, so editor settings aren't shared automatically. If
+VS Code feels sluggish (large `.venv`/`node_modules`/`__pycache__` trees), add
+this to your own `.vscode/settings.json` to stop the file watcher and search
+indexer from scanning them:
+
+```json
+{
+  "files.watcherExclude": {
+    "**/venv/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/*.pyc": true,
+    "**/node_modules/**": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
+  "search.exclude": {
+    "**/venv": true,
+    "**/.venv": true,
+    "**/__pycache__": true
+  }
+}
+```
+
+This only affects the editor (watching/search/Explorer display); it has no
+effect on how the app runs.
+
 ## Frontend (React + Redux Toolkit)
 
 All post-login pages — `/home`, `/app` (the recorder), `/admin`,
