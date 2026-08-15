@@ -255,24 +255,37 @@ indexer from scanning them:
 
 ```json
 {
+  "files.exclude": {
+    "**/.git": true,
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.venv": true,
+    "**/venv": true,
+    "**/node_modules": true,
+    "frontend/dist": true,
+    "**/.pytest_cache": true
+  },
   "files.watcherExclude": {
-    "**/venv/**": true,
     "**/.venv/**": true,
+    "**/venv/**": true,
     "**/__pycache__/**": true,
     "**/*.pyc": true,
-    "**/node_modules/**": true
-  },
-  "files.exclude": {
-    "**/__pycache__": true,
-    "**/*.pyc": true
+    "**/node_modules/**": true,
+    "frontend/dist/**": true
   },
   "search.exclude": {
-    "**/venv": true,
     "**/.venv": true,
-    "**/__pycache__": true
+    "**/venv": true,
+    "**/__pycache__": true,
+    "**/node_modules": true,
+    "frontend/dist": true
   }
 }
 ```
+
+Note: `code --status` (Workspace Stats) does not respect these settings — it's a raw
+diagnostic scan of the folder tree, not an editor-state report. Check the Explorer
+sidebar or Search panel to confirm `.venv` is actually excluded.
 
 This only affects the editor (watching/search/Explorer display); it has no
 effect on how the app runs.
