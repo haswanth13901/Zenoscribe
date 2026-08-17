@@ -13,14 +13,18 @@ per user; an admin can see and manage everything.
 - **Live transcription** with speaker labels, streamed over WebSocket.
 - **Speaker diarization** by Soniox, with post-processing (majority vote +
   streak-based takeover) to clean up attribution at turn boundaries.
-- **Recording per session** — each session saves a `.wav`, a `.txt`
-  transcript, and a metadata row.
+- **Recording per session** — each session (live transcribe, live translate,
+  or a batch upload) saves a `.wav`/`.mp3`, a `.txt` transcript, and a
+  metadata row tagged with its `source` (`transcribe` / `translate` /
+  `upload`), shown as a pill in the recordings tables.
 - **Accounts** — JWT login, per-user recording isolation.
 - **Admin console** — register users, reset passwords, activate/deactivate,
-  delete (with cascade), view all recordings, filter by user and date.
+  delete (with cascade), view all recordings, filter by user, date, and
+  source.
 - **Presence** — `last_seen` per user, shown as online/offline in the admin
   table.
-- **Date filtering** in both the user history drawer and the admin console.
+- **Date and source filtering** in both the user history drawer and the
+  admin console.
 
 ## Requirements
 
@@ -466,12 +470,28 @@ All in `config.py`:
   `db.init()` runs `alembic upgrade head` automatically at startup, so a fresh
   database is migrated on first run same as before. To manage migrations
   directly: `alembic upgrade head`, `alembic revision -m "..."`.
-- **`recordings/`** — saved `.wav` and `.txt` files. Deliberately *not* served
-  as static files; all access goes through authenticated, ownership-checked API
-  routes.
+- **`recordings/`** — saved `.wav`/`.mp3` and `.txt` files. Deliberately *not*
+  served as static files; all access goes through authenticated,
+  ownership-checked API routes.
+- **`recordings.source`** — one of `transcribe` / `translate` / `upload`
+  (`db.RECORDING_SOURCES`), recording which flow produced the row: a live
+  transcription session, a live translate session, or a batch upload via
+  `/api/transcribe` or `/api/transcribe/translate`. `GET /api/recordings`
+  accepts an optional `source` filter alongside `user_id`/`date_from`/`date_to`.
 
 `recordings/` is not committed to git (see `.gitignore`); neither is `.env`
 (which holds `DATABASE_URL` and other secrets).
+
+If `recordings/` and the `recordings` table ever drift out of sync (e.g. a
+partial failure mid-save), `scripts/reconcile_recordings.py` reports files on
+disk with no matching DB row and DB rows pointing at missing files. It's a
+dry-run report by default; pass `--delete` to also remove orphaned files (it
+never touches the database):
+
+```bash
+python scripts/reconcile_recordings.py            # report only
+python scripts/reconcile_recordings.py --delete   # also delete orphan files
+```
 
 ## Security notes
 
@@ -516,4 +536,14 @@ All in `config.py`:
 
 `soniox_client.transcribe_file(path)` uploads a `.wav`/`.mp3` and returns merged
 speaker turns using the async API, which has full-file context and is more
-accurate than the live path. Exposed at `POST /api/transcribe` (authenticated).
+accurate than the live path. Exposed at `POST /api/transcribe` (authenticated),
+and at `POST /api/transcribe/translate` for the same upload plus server-side
+one-way translation.
+
+A non-empty result from either endpoint is persisted the same way a live
+session is — the uploaded audio is moved into `recordings/` (keeping its
+original extension), a `.txt` transcript is written, and a `recordings` row is
+added with `source="upload"` — so batch uploads show up in My/All Recordings
+alongside live sessions. This is best-effort: a storage/DB failure here is
+logged but does not turn an otherwise-successful transcription into an error
+response for the caller.
