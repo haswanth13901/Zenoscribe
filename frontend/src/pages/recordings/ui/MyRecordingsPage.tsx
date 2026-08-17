@@ -93,12 +93,6 @@ export function MyRecordingsPage(): ReactElement {
     date_to: dateTo || undefined,
   });
 
-  function clearFilters() {
-    setSource("");
-    setDateFrom("");
-    setDateTo("");
-  }
-
   return (
     <AppLayout user={user}>
       <main className={styles.main}>
@@ -137,11 +131,6 @@ export function MyRecordingsPage(): ReactElement {
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
               />
-            </div>
-            <div className={styles.filterActions}>
-              <button type="button" onClick={clearFilters}>
-                Clear
-              </button>
             </div>
           </div>
 

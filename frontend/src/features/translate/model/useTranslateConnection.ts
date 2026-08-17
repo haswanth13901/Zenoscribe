@@ -58,19 +58,22 @@ export function useTranslateConnection() {
   const activeRef = useRef(false);
 
   const playAudioChunk = useCallback((base64: string, sampleRate: number) => {
-    // One AudioContext for the whole session, created lazily at the first
-    // chunk's rate - matches ensurePlayCtx() exactly (not recreated per
-    // utterance, so the gapless playHead cursor stays valid across them).
-    if (!playCtxRef.current) {
-      playCtxRef.current = new AudioContext({ sampleRate });
-    }
+    // The context itself is created (and resumed) synchronously in start(),
+    // inside the click handler - see the comment there for why. It isn't
+    // recreated per utterance, so the gapless playHead cursor stays valid
+    // across them.
     const ac = playCtxRef.current;
+    if (!ac) return;
     const bin = atob(base64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     const view = new DataView(bytes.buffer);
     const n = Math.floor(bytes.length / 2);
-    const buffer = ac.createBuffer(1, n, ac.sampleRate);
+    // Buffer is declared at the source's own sample rate, not the context's
+    // - the AudioBufferSourceNode resamples to ac.sampleRate automatically
+    // on playback, so this plays at correct pitch/speed regardless of what
+    // rate the context actually ended up running at.
+    const buffer = ac.createBuffer(1, n, sampleRate);
     const channel = buffer.getChannelData(0);
     for (let i = 0; i < n; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
     const srcNode = ac.createBufferSource();
@@ -135,6 +138,18 @@ export function useTranslateConnection() {
       if (activeRef.current) return;
       activeRef.current = true;
       dispatch({ type: "start-requested" });
+
+      if (settings.speak) {
+        // Created + resumed synchronously here, inside the click handler,
+        // rather than lazily inside playAudioChunk (which only runs off an
+        // async WebSocket message). Mobile Safari's autoplay policy only
+        // unlocks audio output for a context that is created or resumed
+        // within the actual user-gesture call stack; one spun up later from
+        // a network callback stays suspended and plays nothing.
+        const playCtx = new AudioContext();
+        playCtxRef.current = playCtx;
+        void playCtx.resume().catch(() => {});
+      }
 
       void (async () => {
         let stream: MediaStream;

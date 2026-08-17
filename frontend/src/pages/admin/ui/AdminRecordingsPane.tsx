@@ -111,13 +111,6 @@ export function AdminRecordingsPane(): ReactElement {
     date_to: dateTo || undefined,
   });
 
-  function clearFilters() {
-    setUserId("");
-    setSource("");
-    setDateFrom("");
-    setDateTo("");
-  }
-
   return (
     <div className={styles.panel}>
       <h2 className={styles.heading}>All recordings</h2>
@@ -165,14 +158,6 @@ export function AdminRecordingsPane(): ReactElement {
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
           />
-        </div>
-        <div className={styles.filterActions}>
-          <button type="button" onClick={() => refetch()}>
-            Apply
-          </button>
-          <button type="button" onClick={clearFilters}>
-            Clear
-          </button>
         </div>
       </div>
 

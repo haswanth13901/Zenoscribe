@@ -45,16 +45,21 @@
   font-size: 14px;
 }
 
-.filterActions {
-  display: flex;
-  gap: 8px;
-  min-width: auto;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+}
+
+@media (max-width: 720px) {
+  /* Scrolls the table itself horizontally instead of squeezing columns
+     unreadably or blowing out .panel's width on a phone viewport. */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
 }
 
 th {

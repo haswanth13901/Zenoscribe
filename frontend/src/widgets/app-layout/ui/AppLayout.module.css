@@ -28,7 +28,9 @@
   position: absolute;
   top: 15px;
   left: 14px;
-  z-index: 5;
+  /* Above .backdrop (10) and the narrow-viewport overlay .sidebar (15) in
+     Sidebar.module.css, so it stays clickable to close the drawer too. */
+  z-index: 20;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -45,4 +47,21 @@
 .sidebarToggle:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+/* Only rendered (and only visible - display:none above the breakpoint)
+   while the drawer is open on a narrow viewport; tapping it closes the
+   sidebar, matching the standard mobile off-canvas-nav pattern. */
+.backdrop {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 10;
+  }
 }

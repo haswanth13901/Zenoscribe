@@ -32,4 +32,7 @@ COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 EXPOSE 8000
 
-CMD ["uvicorn", "voice_transcriber.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form (not exec-array form) so $PORT is expanded at container start -
+# PaaS hosts (Render/Railway/Heroku-style) inject PORT and require the app
+# to bind to it; fixed-port hosts (VPS, Fly.io) get the 8000 default.
+CMD uvicorn voice_transcriber.server:app --host 0.0.0.0 --port ${PORT:-8000}

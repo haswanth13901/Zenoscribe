@@ -72,3 +72,24 @@
 .navGroup:first-child {
   padding-top: 4px;
 }
+
+/* Below this width the sidebar switches from an in-flow flex column (which
+   pushes .mainCol over and eats a fixed 190px of a narrow viewport) to an
+   absolutely positioned overlay drawer that floats over content instead -
+   AppLayout starts it collapsed by default on these viewports and adds the
+   .backdrop click-to-close target (see AppLayout.module.css). */
+@media (max-width: 720px) {
+  .sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 15;
+    width: min(78vw, 260px);
+    flex-basis: auto;
+    box-shadow: 2px 0 18px rgba(0, 0, 0, 0.25);
+  }
+
+  .collapsed {
+    width: 0;
+    box-shadow: none;
+  }
+}

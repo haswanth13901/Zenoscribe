@@ -18,3 +18,12 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* Makes #appLayout's flex:1 (AppLayout.module.css) actually stretch to the
+   viewport instead of shrink-wrapping to page content height - without
+   this, short pages (e.g. Home) leave the sidebar shorter than the
+   viewport, exposing body's background below it. */
+#root {
+  display: flex;
+  flex-direction: column;
+}

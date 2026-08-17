@@ -19,6 +19,17 @@ table {
   font-size: 14px;
 }
 
+@media (max-width: 720px) {
+  /* Scrolls the table itself horizontally instead of squeezing columns
+     unreadably or blowing out .panel's width on a phone viewport. */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+}
+
 th {
   text-align: left;
   font-size: 11px;

@@ -1,9 +1,3 @@
-# NOTE: the `volumes` bind-mount below shadows the image's baked-in
-# voice_transcriber/static/home_dist/ (built by the frontend-build stage in
-# Dockerfile) with whatever is on the host at that path. Before `docker
-# compose up`, run `npm --prefix frontend run build` on the host (or
-# `docker compose run --rm web npm --prefix frontend run build`) so /home
-# serves a real build instead of a missing/stale one.
 services:
   db:
     image: postgres:16-alpine
@@ -23,12 +17,19 @@ services:
   web:
     build: .
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:${PORT:-8000}"
     env_file:
       - .env
+    # Only backend source is bind-mounted for live-edit convenience - the
+    # image's baked frontend/dist (built by the Dockerfile's frontend-build
+    # stage) is deliberately left alone so it isn't shadowed by a missing or
+    # stale host-side build.
     volumes:
-      - ./:/app
-    command: uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000
+      - ./voice_transcriber:/app/voice_transcriber
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./scripts:/app/scripts
+    command: uvicorn voice_transcriber.server:app --host 0.0.0.0 --port ${PORT:-8000}
     restart: unless-stopped
     depends_on:
       db:

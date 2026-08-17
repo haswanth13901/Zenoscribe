@@ -171,16 +171,12 @@ uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 --workers 1
 
 CI / E2E tests
 
-- The repository includes an opinionated GitHub Actions workflow that runs the
-  Playwright E2E test (`.github/workflows/playwright-e2e.yml`). The workflow
-  references `TEST_HOOK_SECRET` from repository secrets and enables test hooks
-  during the job.
-- To set it: GitHub repo → Settings → Secrets and variables → Actions → New
-  repository secret, with name `TEST_HOOK_SECRET` and any random value. Never
-  commit the value itself — it lives only in the encrypted secrets store.
-- This secret is optional for the bundled E2E test, which sets its own hook
-  secret internally; providing it just keeps the job environment consistent for
-  any future test that reads it from the environment.
+- The repository includes a GitHub Actions workflow (`.github/workflows/ci.yml`)
+  with three jobs: the fast pytest suite, the Playwright integration suite (all
+  `test_e2e_playwright_*.py` files), and the frontend Vitest suite.
+- No test-hook env vars need to be set at the job level: the `live_server`
+  fixture that actually launches the test server always sets its own
+  `ALLOW_TEST_HOOKS`/hook secret on the subprocess's environment directly.
 
 Troubleshooting
 
