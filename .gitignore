@@ -50,3 +50,6 @@ Thumbs.db
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# --- Scratch / personal notes ---
+Update_Roadmap.txt
