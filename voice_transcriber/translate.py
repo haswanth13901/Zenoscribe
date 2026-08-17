@@ -20,6 +20,8 @@ import base64
 import json
 import logging
 import uuid
+import wave
+from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from websockets import connect
@@ -28,11 +30,13 @@ from websockets.exceptions import ConnectionClosedOK
 try:
     from . import auth
     from . import config
+    from . import db
     from . import languages
     from . import soniox_client as sx
 except ImportError:  # run flat from inside the package dir
     import auth
     import config
+    import db
     import languages
     import soniox_client as sx
 
@@ -111,6 +115,36 @@ async def translate(client: WebSocket):
         except (WebSocketDisconnect, RuntimeError):
             alive = False
 
+    # Auto-save, mirroring the transcription engine (transcribe.py): capture
+    # the mic audio to a WAV file and register a Recording once the session
+    # has at least one closed utterance. Only the mic (source) audio is
+    # captured - the TTS playback audio is synthesized from the saved text
+    # and doesn't need its own copy.
+    started_at = datetime.now()
+    stamp = started_at.strftime("%Y%m%d-%H%M%S")
+    session = f"{stamp}-{ws_user['username']}-translate-{uuid.uuid4().hex[:6]}"
+    wav_path = config.RECORDINGS / f"{session}.wav"
+
+    wf = wave.open(str(wav_path), "wb")
+    wf.setnchannels(1)
+    wf.setsampwidth(2)  # int16
+    wf.setframerate(16000)
+    write_queue = asyncio.Queue()
+    turns = []
+
+    async def audio_writer():
+        while True:
+            chunk = await write_queue.get()
+            if chunk is None:
+                write_queue.task_done()
+                break
+            try:
+                await asyncio.to_thread(wf.writeframes, chunk)
+            finally:
+                write_queue.task_done()
+
+    writer_task = asyncio.create_task(audio_writer())
+
     try:
         async with connect(sx.WS_URL, max_size=None) as stt:
             await stt.send(json.dumps(stt_cfg))
@@ -124,6 +158,7 @@ async def translate(client: WebSocket):
                     while True:
                         msg = await client.receive()
                         if "bytes" in msg and msg["bytes"] is not None:
+                            await write_queue.put(msg["bytes"])
                             await stt.send(msg["bytes"])
                             last_audio_sent["t"] = loop.time()
                         elif "text" in msg and msg["text"]:
@@ -196,6 +231,33 @@ async def translate(client: WebSocket):
                 if not lang_votes:
                     return None
                 return max(lang_votes, key=lang_votes.get)
+
+            # Session-relative wall-clock offset for the saved transcript -
+            # approximate (unlike transcribe.py's token-derived start_ms,
+            # translate tokens' timing isn't read here), but good enough for
+            # a "[12.3s]" label in the saved .txt.
+            session_start = loop.time()
+            utt_start = {"t": session_start}
+
+            def _record_turn_and_clear():
+                """Append the just-closed utterance to `turns` (if it has any
+                content) and reset the per-utterance accumulators, mirroring
+                the reset already done at each utterance boundary."""
+                source = src_final["text"].strip()
+                translation = tgt_final["text"].strip()
+                if source or translation:
+                    turns.append({
+                        "start": utt_start["t"] - session_start,
+                        "speaker": current_speaker() if diarize else None,
+                        "language": current_language(),
+                        "source": source,
+                        "translation": translation,
+                    })
+                src_final["text"] = ""
+                tgt_final["text"] = ""
+                spk_votes.clear()
+                lang_votes.clear()
+                utt_start["t"] = loop.time()
 
             async def pump_stt():
                 async for raw in stt:
@@ -292,13 +354,11 @@ async def translate(client: WebSocket):
                             "speaker": current_speaker() if diarize else None,
                             "language": current_language(),
                         })
-                        src_final["text"] = ""
-                        tgt_final["text"] = ""
-                        spk_votes.clear()
-                        lang_votes.clear()
+                        _record_turn_and_clear()
 
                 # Stream closed: speak anything still buffered.
                 await speak_utterance()
+                _record_turn_and_clear()
 
             async def idle_watchdog():
                 # Close an utterance after a quiet gap, in case no endpoint
@@ -311,6 +371,7 @@ async def translate(client: WebSocket):
                         last_token_at["t"] = None
                         await speak_utterance()
                         await to_browser({"type": "utterance_end"})
+                        _record_turn_and_clear()
 
             async def keepalive_and_silence():
                 # Two jobs on one clock:
@@ -360,10 +421,94 @@ async def translate(client: WebSocket):
         await to_browser({"type": "error", "message": str(e)})
     finally:
         alive = False
+        await write_queue.put(None)
+        try:
+            await writer_task
+        except Exception:
+            log.exception("translate audio writer failed")
+        try:
+            await asyncio.to_thread(wf.close)
+        except Exception:
+            log.exception("failed to close translate wav file")
+
+        if not turns:
+            log.info("discarding empty translate session %s for %s",
+                      session, ws_user["username"])
+            try:
+                await asyncio.to_thread(wav_path.unlink)
+            except Exception:
+                log.exception("failed to delete empty translate wav %s", wav_path)
+        else:
+            await _save_translate_session(session, ws_user, wav_path, started_at, turns)
+
         try:
             await client.close()
         except Exception:
             pass
+
+
+def _wav_duration(path):
+    frames = wave.open(str(path), "rb")
+    try:
+        return frames.getnframes() / float(frames.getframerate() or 1)
+    finally:
+        frames.close()
+
+
+async def _save_translate_session(session, ws_user, wav_path, started_at, turns):
+    """Persist a finished, non-empty translate session: transcript, wav
+    duration, DB row. Extracted out of the websocket handler's `finally`
+    block so it can be exercised directly in tests (translate.py has no
+    fake-mode/mock harness for the live Soniox connection, unlike
+    transcribe_file's ALLOW_TEST_HOOKS path, so this is otherwise only
+    reachable with real Soniox credentials).
+
+    Each of the three writes is caught and logged independently, so a
+    failure in one is diagnosable from the log message alone and doesn't
+    skip the other two - unlike the single try/except this replaced, which
+    swallowed all three under one generic message and could leave a WAV
+    orphaned with no transcript and no DB row.
+    """
+    txt_path = config.RECORDINGS / f"{session}.txt"
+    try:
+        await asyncio.to_thread(
+            txt_path.write_text,
+            "\n".join(
+                f"[{t['start']:.1f}s] {t['speaker'] or 'user-1'}"
+                f" ({t['language'] or '?'}): {t['source']}\n"
+                f"    -> {t['translation']}"
+                for t in turns
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        log.exception("failed to write translate transcript %s", txt_path)
+
+    try:
+        duration = await asyncio.to_thread(_wav_duration, wav_path)
+    except Exception:
+        duration = 0.0
+        log.exception("failed to read translate wav duration %s", wav_path)
+
+    preview = " ".join(t["translation"] or t["source"] for t in turns)[:160]
+    try:
+        await asyncio.to_thread(
+            db.add_recording,
+            session,
+            ws_user["id"],
+            wav_path.name,
+            txt_path.name,
+            started_at.isoformat(),
+            duration,
+            len(turns),
+            preview,
+            "translate",
+        )
+    except Exception:
+        log.exception("could not register translate recording %s", session)
+    else:
+        log.info("saved translate session %s for %s (%d turns)",
+                  session, ws_user["username"], len(turns))
 
 
 async def _fail(client, message):
@@ -386,9 +531,13 @@ async def _tts_utterance(text, language, voice, to_browser):
             await tts.send(json.dumps(
                 sx.tts_config(voice=voice, language=language, stream_id=stream_id)
             ))
-            await tts.send(json.dumps({"text": text, "stream_id": stream_id}))
-            # Empty text closes the stream and flushes final audio.
-            await tts.send(json.dumps({"text": "", "stream_id": stream_id}))
+            # text_end is a required field on every text message - omitting
+            # it (the previous bug) leaves Soniox waiting indefinitely for a
+            # completion signal that never arrives, until its own backend
+            # deadline expires and it returns a "Request timeout" error.
+            await tts.send(json.dumps({
+                "text": text, "text_end": True, "stream_id": stream_id,
+            }))
 
             await to_browser({
                 "type": "audio_start",
@@ -406,15 +555,19 @@ async def _tts_utterance(text, language, voice, to_browser):
                     continue
                 msg = json.loads(raw)
                 if msg.get("error_code"):
+                    # Isolated to this one utterance's TTS stream - a
+                    # transient hiccup here shouldn't tear down the whole
+                    # live session, so this is a distinct type from the
+                    # fatal "error" the STT/session path sends.
                     await to_browser({
-                        "type": "error",
+                        "type": "tts_error",
                         "message": msg.get("error_message"),
                     })
                     break
                 # Base64 audio delivered as JSON (some deployments do this).
                 if msg.get("audio"):
                     await to_browser({"type": "audio", "pcm": msg["audio"]})
-                if msg.get("finished") or msg.get("done"):
+                if msg.get("terminated"):
                     break
 
             await to_browser({"type": "audio_end"})
@@ -422,4 +575,4 @@ async def _tts_utterance(text, language, voice, to_browser):
         await to_browser({"type": "audio_end"})
     except Exception as e:
         log.warning("tts stream failed: %s", e)
-        await to_browser({"type": "error", "message": f"TTS failed: {e}"})
+        await to_browser({"type": "tts_error", "message": f"TTS failed: {e}"})

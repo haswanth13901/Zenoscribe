@@ -14,9 +14,30 @@ def seeded_recording(isolated_recordings, isolated_db, make_user):
     (isolated_recordings / "r.wav").write_bytes(b"RIFF....WAVEfmt ")
     db.add_recording(
         "rec-1", user_id, "r.wav", "r.txt",
-        "2026-01-01T00:00:00", 1.2, 1, "Hello",
+        "2026-01-01T00:00:00", 1.2, 1, "Hello", "transcribe",
     )
     return user_id, "rec-1"
+
+
+@pytest.fixture
+def mixed_source_recordings(isolated_db, make_user):
+    """Two users, each with one transcribe and one translate recording, on
+    different dates - enough to exercise source/user/date composing."""
+    alice_id = make_user("alice", "AlicePass123!")
+    bob_id = make_user("bob", "BobPass123!")
+    db.add_recording(
+        "alice-transcribe", alice_id, "a1.wav", "a1.txt",
+        "2026-01-01T00:00:00", 5.0, 1, "alice recorder", "transcribe",
+    )
+    db.add_recording(
+        "alice-translate", alice_id, "a2.wav", "a2.txt",
+        "2026-01-05T00:00:00", 5.0, 1, "alice translate", "translate",
+    )
+    db.add_recording(
+        "bob-transcribe", bob_id, "b1.wav", "b1.txt",
+        "2026-01-10T00:00:00", 5.0, 1, "bob recorder", "transcribe",
+    )
+    return {"alice": alice_id, "bob": bob_id}
 
 
 def _login(client, username, password):
@@ -63,3 +84,78 @@ def test_admin_can_access_any_recording(client, make_user, seeded_recording):
     _, rec_id = seeded_recording
     r = client.get(f"/api/recordings/{rec_id}/transcript", headers=headers)
     assert r.status_code == 200
+
+
+def test_recording_payload_includes_source(client, seeded_recording):
+    headers = _login(client, "rec_user", "RecPass123!")
+    r = client.get("/api/recordings", headers=headers)
+    row = next(row for row in r.json() if row["id"] == "rec-1")
+    assert row["source"] == "transcribe"
+
+
+def test_own_user_source_filter_excludes_other_users_and_types(
+    client, mixed_source_recordings,
+):
+    """A non-admin's My recordings view: scoped to self (routes_api.py's
+    `scope = ... else user["id"]`) *and* filtered by source, composed.
+    alice is already seeded by the mixed_source_recordings fixture."""
+    headers = _login(client, "alice", "AlicePass123!")
+
+    r = client.get("/api/recordings", headers=headers, params={"source": "translate"})
+    assert r.status_code == 200
+    ids = {row["id"] for row in r.json()}
+    assert ids == {"alice-translate"}  # not bob's, not alice's transcribe row
+
+
+def test_admin_source_filter_returns_only_matching_rows(client, make_user, mixed_source_recordings):
+    make_user("mix_admin", "MixAdminPass123!", role="admin")
+    headers = _login(client, "mix_admin", "MixAdminPass123!")
+
+    r = client.get("/api/recordings", headers=headers, params={"source": "translate"})
+    assert r.status_code == 200
+    ids = {row["id"] for row in r.json()}
+    assert ids == {"alice-translate"}
+
+
+def test_source_composes_with_user_and_date_filters(client, make_user, mixed_source_recordings):
+    make_user("mix_admin2", "MixAdmin2Pass123!", role="admin")
+    headers = _login(client, "mix_admin2", "MixAdmin2Pass123!")
+
+    r = client.get(
+        "/api/recordings",
+        headers=headers,
+        params={
+            "user_id": mixed_source_recordings["alice"],
+            "source": "transcribe",
+            "date_from": "2025-12-31",
+            "date_to": "2026-01-02",
+        },
+    )
+    assert r.status_code == 200
+    ids = {row["id"] for row in r.json()}
+    assert ids == {"alice-transcribe"}
+
+    # Same filters but a date range that excludes it -> empty, not an error.
+    r = client.get(
+        "/api/recordings",
+        headers=headers,
+        params={
+            "user_id": mixed_source_recordings["alice"],
+            "source": "transcribe",
+            "date_from": "2026-02-01",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_invalid_source_filter_returns_400(client, seeded_recording):
+    headers = _login(client, "rec_user", "RecPass123!")
+    r = client.get("/api/recordings", headers=headers, params={"source": "bogus"})
+    assert r.status_code == 400
+
+
+def test_invalid_date_filter_returns_400_not_500(client, seeded_recording):
+    headers = _login(client, "rec_user", "RecPass123!")
+    r = client.get("/api/recordings", headers=headers, params={"date_from": "not-a-date"})
+    assert r.status_code == 400

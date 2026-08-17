@@ -24,7 +24,7 @@ function makeStore() {
 function renderPanel(open = true) {
   return render(
     <Provider store={makeStore()}>
-      <UploadPanel open={open} onClose={vi.fn()} />
+      <UploadPanel open={open} />
     </Provider>,
   );
 }
@@ -90,6 +90,22 @@ describe("UploadPanel", () => {
     await waitFor(() => expect(screen.getByText("hello world")).toBeInTheDocument());
     expect(sawTargetLanguage).toBeNull();
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it("Reset clears the selected file and the transcription result", async () => {
+    server.use(
+      http.post("/api/transcribe/translate", () => HttpResponse.json({ turns: [{ text: "hello world" }] })),
+    );
+    renderPanel();
+    await pickFile();
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+    await waitFor(() => expect(screen.getByText("hello world")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(screen.queryByText(/Selected: session\.wav/)).not.toBeInTheDocument();
+    expect(screen.queryByText("hello world")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Transcribe" })).toBeDisabled();
   });
 
   it("sends the FormData body with the browser-set multipart Content-Type", async () => {

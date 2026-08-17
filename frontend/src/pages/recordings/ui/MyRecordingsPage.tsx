@@ -5,7 +5,9 @@ import {
   useGetRecordingsQuery,
   useLazyGetTranscriptQuery,
 } from "@/entities/recording/api/recordingsApi";
-import type { Recording } from "@/entities/recording/model/types";
+import type { Recording, RecordingSource } from "@/entities/recording/model/types";
+import { RECORDING_SOURCE_LABELS } from "@/entities/recording/model/types";
+import { RecordingSourceTag } from "@/entities/recording/ui/RecordingSourceTag";
 import { downloadAuthenticated, triggerBlobDownload } from "@/shared/lib/download";
 import { fmtDate } from "@/shared/lib/fmtDate";
 import { fmtDur } from "@/shared/lib/formatters";
@@ -47,6 +49,9 @@ function RecordingRow({
   return (
     <tr>
       <td>{fmtDate(recording.started_at)}</td>
+      <td>
+        <RecordingSourceTag source={recording.source} />
+      </td>
       <td>{fmtDur(recording.duration)}</td>
       <td>{recording.turn_count}</td>
       <td className={styles.preview}>{recording.preview || "—"}</td>
@@ -71,6 +76,7 @@ function RecordingRow({
 // to the signed-in user (no user-filter dropdown needed).
 export function MyRecordingsPage(): ReactElement {
   const user = useAppSelector((s) => s.auth.user)!;
+  const [source, setSource] = useState<RecordingSource | "">("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -82,11 +88,13 @@ export function MyRecordingsPage(): ReactElement {
     refetch,
   } = useGetRecordingsQuery({
     user_id: user.id,
+    source: source || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
 
   function clearFilters() {
+    setSource("");
     setDateFrom("");
     setDateTo("");
   }
@@ -97,6 +105,21 @@ export function MyRecordingsPage(): ReactElement {
         <div className={styles.panel}>
           <h2 className={styles.heading}>My recordings</h2>
           <div className={styles.filters}>
+            <div>
+              <label htmlFor="my-rec-filter-type">Type</label>
+              <select
+                id="my-rec-filter-type"
+                value={source}
+                onChange={(e) => setSource(e.target.value as RecordingSource | "")}
+              >
+                <option value="">All types</option>
+                {(Object.keys(RECORDING_SOURCE_LABELS) as RecordingSource[]).map((s) => (
+                  <option key={s} value={s}>
+                    {RECORDING_SOURCE_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <label htmlFor="my-rec-filter-from">From</label>
               <input
@@ -142,6 +165,7 @@ export function MyRecordingsPage(): ReactElement {
               <thead>
                 <tr>
                   <th>When</th>
+                  <th>Type</th>
                   <th>Length</th>
                   <th>Turns</th>
                   <th>Preview</th>

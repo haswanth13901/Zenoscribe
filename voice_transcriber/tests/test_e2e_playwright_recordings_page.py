@@ -51,6 +51,7 @@ def test_recordings_page_lists_own_recordings_filtered_by_date(live_server):
             duration=12.3,
             turn_count=2,
             preview="hello from the seeded recording",
+            source="transcribe",
         )
 
         from playwright.sync_api import sync_playwright

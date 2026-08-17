@@ -34,7 +34,7 @@ export function TranslatePage(): ReactElement {
   const [languageA, setLanguageA] = useState("en");
   const [languageB, setLanguageB] = useState("es");
   const [voice, setVoice] = useState("");
-  const [speak, setSpeak] = useState(true);
+  const [speak, setSpeak] = useState(false);
   const [diarize, setDiarize] = useState(false);
   const [numSpeakers, setNumSpeakers] = useState("");
   const [view, setView] = useState<ViewMode>(readStoredView);
@@ -207,16 +207,35 @@ export function TranslatePage(): ReactElement {
               ))}
             </select>
           </div>
+
+          <div className={styles.field} title="Optional hint for how many distinct voices to expect">
+            <label htmlFor="translate-num-speakers">Speakers</label>
+            <input
+              id="translate-num-speakers"
+              type="number"
+              data-testid="translate-num-speakers"
+              min={1}
+              max={10}
+              placeholder="auto"
+              value={numSpeakers}
+              disabled={controlsLocked}
+              onChange={(e) => setNumSpeakers(e.target.value)}
+            />
+          </div>
         </div>
 
         <div className={styles.row2}>
           <label className={styles.toggleField}>
             <input
               type="checkbox"
+              className={styles.toggleInput}
               checked={speak}
               disabled={controlsLocked}
               onChange={(e) => setSpeak(e.target.checked)}
             />
+            <span className={styles.track}>
+              <span className={styles.thumb} />
+            </span>
             Speak translation
           </label>
           <label
@@ -225,27 +244,15 @@ export function TranslatePage(): ReactElement {
           >
             <input
               type="checkbox"
+              className={styles.toggleInput}
               checked={diarize}
               onChange={(e) => setDiarize(e.target.checked)}
             />
+            <span className={styles.track}>
+              <span className={styles.thumb} />
+            </span>
             Label speakers
           </label>
-          {diarize && (
-            <div className={styles.field} title="Optional hint for how many distinct voices to expect">
-              <label htmlFor="translate-num-speakers">Speakers</label>
-              <input
-                id="translate-num-speakers"
-                type="number"
-                data-testid="translate-num-speakers"
-                min={1}
-                max={10}
-                placeholder="auto"
-                value={numSpeakers}
-                disabled={controlsLocked}
-                onChange={(e) => setNumSpeakers(e.target.value)}
-              />
-            </div>
-          )}
 
           <div className={styles.viewSwitch}>
             <button
@@ -278,6 +285,7 @@ export function TranslatePage(): ReactElement {
           <button
             type="button"
             data-testid="translate-restart"
+            className={styles.button}
             title="Clear the transcript and start a fresh session"
             disabled={state.statusMessage === "restarting"}
             onClick={handleRestart}

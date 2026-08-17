@@ -30,6 +30,7 @@ export function UtteranceCard({
         <span className={styles.meta}>
           {langName(utterance.language)} · {fmtTime(utterance.ts)}
         </span>
+        {utterance.live && <span className={styles.interimTag}>interim</span>}
       </div>
       <div className={styles.source}>{utterance.source}</div>
       <div className={styles.translation}>

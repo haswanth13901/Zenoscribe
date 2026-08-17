@@ -1,5 +1,4 @@
 import type { ReactElement } from "react";
-import { useNavigate } from "react-router-dom";
 import { useAppSelector } from "@/app/hooks";
 import { AppLayout } from "@/widgets/app-layout/ui/AppLayout";
 import { UploadPanel } from "@/features/transcribe/ui/UploadPanel";
@@ -9,14 +8,14 @@ import { UploadPanel } from "@/features/transcribe/ui/UploadPanel";
 // speak." placeholder, Admin's Users/Recordings tabs) - now its own route,
 // so the batch-transcribe form is the only thing on screen. UploadPanel
 // itself is unchanged (still used, unmodified, by nothing else now that
-// this is the only mount point) - "Close" navigates back to /home.
+// this is the only mount point) - "Reset" clears the form in place instead
+// of navigating away.
 export function UploadPage(): ReactElement {
   const user = useAppSelector((s) => s.auth.user)!;
-  const navigate = useNavigate();
 
   return (
     <AppLayout user={user}>
-      <UploadPanel open onClose={() => navigate("/home")} />
+      <UploadPanel open />
     </AppLayout>
   );
 }

@@ -33,10 +33,18 @@
   }
 }
 
+.toggleBtn {
+  composes: button from "../../../shared/ui/toolbarField.module.css";
+}
+
 .toggleBtn.rec {
   background: var(--rec);
   border-color: var(--rec);
   color: #fff;
+}
+
+.button {
+  composes: button from "../../../shared/ui/toolbarField.module.css";
 }
 
 .controls {
@@ -59,35 +67,16 @@
   align-items: center;
 }
 
-.field label {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--muted);
-  margin-bottom: 6px;
+.field {
+  composes: field from "../../../shared/ui/toolbarField.module.css";
 }
 
 .field select {
-  background: var(--field-bg);
-  border: 1px solid var(--field-border);
-  color: var(--text);
-  padding: 9px 11px;
-  border-radius: 7px;
-  font: inherit;
-  font-size: 14px;
   min-width: 150px;
 }
 
 .field input[type="number"] {
-  background: var(--field-bg);
-  border: 1px solid var(--field-border);
-  color: var(--text);
-  padding: 8px 10px;
-  border-radius: 7px;
-  font: inherit;
-  font-size: 14px;
-  width: 64px;
+  width: 72px;
 }
 
 .hint {
@@ -97,15 +86,36 @@
   max-width: 200px;
 }
 
-.modes {
+.modes,
+.viewSwitch {
   display: flex;
-  gap: 6px;
+  gap: 2px;
+  padding: 3px;
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  border-radius: 999px;
 }
 
-.modes button.on {
+.modes button,
+.viewSwitch button {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.modes button:hover:not(:disabled):not(.on),
+.viewSwitch button:hover:not(:disabled):not(.on) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.modes button.on,
+.viewSwitch button.on {
   background: var(--accent);
   color: var(--accent-ink);
-  border-color: var(--accent);
   font-weight: 600;
 }
 
@@ -118,19 +128,52 @@
   cursor: pointer;
 }
 
+.toggleInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.track {
+  flex: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--field-border);
+  transition: background 0.15s ease;
+}
+
+.thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.toggleInput:checked + .track {
+  background: var(--accent);
+}
+
+.toggleInput:checked + .track .thumb {
+  transform: translateX(14px);
+}
+
+.toggleInput:disabled + .track {
+  opacity: 0.5;
+}
+
+.toggleInput:focus-visible + .track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .spacer {
   flex: 1;
-}
-
-.viewSwitch {
-  display: flex;
-  gap: 6px;
-}
-
-.viewSwitch button.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
 }
 
 .main {

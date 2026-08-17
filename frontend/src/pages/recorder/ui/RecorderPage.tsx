@@ -43,9 +43,10 @@ export function RecorderPage(): ReactElement {
         >
           {state.statusMessage === "idle" ? "" : state.statusMessage}
         </span>
-        <label className={styles.speakersField} title="Optional hint for how many distinct voices to expect">
-          Speakers
+        <div className={styles.field} title="Optional hint for how many distinct voices to expect">
+          <label htmlFor="recorder-num-speakers">Speakers</label>
           <input
+            id="recorder-num-speakers"
             type="number"
             data-testid="recorder-num-speakers"
             min={1}
@@ -55,7 +56,7 @@ export function RecorderPage(): ReactElement {
             disabled={controlsLocked}
             onChange={(e) => setNumSpeakers(e.target.value)}
           />
-        </label>
+        </div>
         <button
           type="button"
           data-testid="recorder-toggle"
@@ -65,10 +66,15 @@ export function RecorderPage(): ReactElement {
         >
           {isListening ? "Stop" : "Start"}
         </button>
-        <button type="button" onClick={clear}>
+        <button type="button" className={styles.button} onClick={clear}>
           Clear
         </button>
-        <button type="button" onClick={handleSave} disabled={state.turns.length === 0}>
+        <button
+          type="button"
+          className={styles.button}
+          onClick={handleSave}
+          disabled={state.turns.length === 0}
+        >
           Save
         </button>
       </div>

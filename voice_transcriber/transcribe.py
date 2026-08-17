@@ -70,6 +70,7 @@ async def live(client: WebSocket):
             duration,
             turn_count,
             preview,
+            "transcribe",
         )
 
     async def async_write_text(path, content):

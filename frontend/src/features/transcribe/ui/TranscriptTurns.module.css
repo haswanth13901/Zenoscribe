@@ -1,0 +1,87 @@
+.wrap {
+  margin-top: 10px;
+}
+
+.empty {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.turn {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rowline, rgba(0, 0, 0, 0.04));
+}
+
+.turn:last-child {
+  border-bottom: none;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  min-width: 132px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  padding-top: 2px;
+}
+
+.avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+  background: var(--muted);
+}
+
+.avatar[data-speaker="user-1"] {
+  background: var(--u1);
+}
+.avatar[data-speaker="user-2"] {
+  background: var(--u2);
+}
+.avatar[data-speaker="user-3"] {
+  background: var(--u3);
+}
+.avatar[data-speaker="user-4"] {
+  background: var(--u4);
+}
+
+.body {
+  flex: 1;
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+.source {
+  color: var(--src, var(--text));
+}
+
+.translation {
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--tgt, var(--line));
+  color: var(--tgt, var(--text));
+}
+
+@media (max-width: 640px) {
+  .turn {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .who {
+    min-width: 0;
+  }
+}

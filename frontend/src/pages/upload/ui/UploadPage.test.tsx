@@ -46,9 +46,9 @@ describe("UploadPage", () => {
     expect(screen.queryByText("Press Start and speak.")).not.toBeInTheDocument();
   });
 
-  it("Close navigates to /home", async () => {
+  it("Reset stays on /upload", async () => {
     renderUploadPage();
-    await userEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/home");
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/upload");
   });
 });

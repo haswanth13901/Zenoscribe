@@ -3,22 +3,18 @@ import type { SerializedError } from "@reduxjs/toolkit";
 import type { FetchBaseQueryError } from "@reduxjs/toolkit/query";
 import { useGetLanguagesQuery } from "@/entities/language/api/languagesApi";
 import { extractApiError } from "@/shared/lib/apiError";
-import { useTranscribeTranslateMutation } from "@/features/transcribe/api/transcribeApi";
+import {
+  useTranscribeTranslateMutation,
+  type TranscribeTurn,
+} from "@/features/transcribe/api/transcribeApi";
+import { TranscriptTurns } from "@/features/transcribe/ui/TranscriptTurns";
 import styles from "./UploadPanel.module.css";
 
 interface UploadPanelProps {
   open: boolean;
-  onClose: () => void;
 }
 
 const FALLBACK_LANGUAGES = [{ code: "en", name: "English" }];
-
-function joinTurns(turns: { text: string }[]): string {
-  return turns
-    .map((t) => t.text || "")
-    .join(" ")
-    .trim();
-}
 
 // The original showed the raw fetch failure via alert('Upload failed: ' +
 // status + ' ' + text) - replaced with inline UI (no alert()), but keeping
@@ -32,21 +28,21 @@ function formatUploadError(error: FetchBaseQueryError | SerializedError | undefi
 }
 
 // Port of upload.js's batch-transcribe widget, now mounted only by
-// UploadPage.tsx (/upload) - kept as its own open/onClose-driven component
-// rather than inlined there, since UploadPanel.test.tsx's full behavioral
-// coverage stays independent of wherever it's mounted. Auto-opening the
+// UploadPage.tsx (/upload) - kept as its own open-driven component rather
+// than inlined there, since UploadPanel.test.tsx's full behavioral coverage
+// stays independent of wherever it's mounted. Auto-opening the
 // native file picker (as the original's uploadBtn.onclick did) isn't
 // reliably possible from a route-change effect - browsers only allow it
 // synchronously inside a real click handler - so this shows a visible
 // "Choose file" trigger instead, a deliberate small UX adaptation, not a
 // missed port.
-export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement | null {
+export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [targetLanguage, setTargetLanguage] = useState("en");
   const [numSpeakers, setNumSpeakers] = useState("");
-  const [transcribeResult, setTranscribeResult] = useState<string | null>(null);
-  const [translateResult, setTranslateResult] = useState<string | null>(null);
+  const [transcribeResult, setTranscribeResult] = useState<TranscribeTurn[] | null>(null);
+  const [translateResult, setTranslateResult] = useState<TranscribeTurn[] | null>(null);
 
   const { data: languagesData, isError: languagesError } = useGetLanguagesQuery(undefined, {
     skip: !open,
@@ -75,7 +71,7 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
     setTranscribeResult(null);
     try {
       const json = await transcribe({ file, numSpeakers: parsedNumSpeakers() }).unwrap();
-      setTranscribeResult(joinTurns(json.turns) || "(no transcription)");
+      setTranscribeResult(json.turns);
     } catch {
       // transcribeState.isError renders the error below.
     }
@@ -90,10 +86,21 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
         targetLanguage,
         numSpeakers: parsedNumSpeakers(),
       }).unwrap();
-      setTranslateResult(joinTurns(json.turns) || "(no translation)");
+      setTranslateResult(json.turns);
     } catch {
       // translateState.isError renders the error below.
     }
+  }
+
+  function handleReset() {
+    setFile(null);
+    setTargetLanguage("en");
+    setNumSpeakers("");
+    setTranscribeResult(null);
+    setTranslateResult(null);
+    transcribeState.reset();
+    translateState.reset();
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   return (
@@ -101,8 +108,8 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
       <div className={styles.card}>
         <div className={styles.head}>
           <strong>Transcribe a file</strong>
-          <button type="button" onClick={onClose}>
-            Close
+          <button type="button" className={styles.button} onClick={handleReset}>
+            Reset
           </button>
         </div>
 
@@ -114,7 +121,7 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
           onChange={onFileChange}
           data-testid="upload-file-input"
         />
-        <button type="button" onClick={() => fileInputRef.current?.click()}>
+        <button type="button" className={styles.button} onClick={() => fileInputRef.current?.click()}>
           Choose file
         </button>
         {file && (
@@ -124,7 +131,28 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
         )}
 
         <div className={styles.row}>
-          <div className={styles.langField}>
+          <div className={styles.field} title="Optional hint for how many distinct voices to expect">
+            <label htmlFor="upload-num-speakers">Speakers</label>
+            <input
+              id="upload-num-speakers"
+              type="number"
+              data-testid="upload-num-speakers"
+              min={1}
+              max={10}
+              placeholder="auto"
+              value={numSpeakers}
+              onChange={(e) => setNumSpeakers(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={doTranscribe}
+            disabled={!file || transcribeState.isLoading}
+          >
+            {transcribeState.isLoading ? "Transcribing..." : "Transcribe"}
+          </button>
+          <div className={styles.field}>
             <label htmlFor="upload-lang">Translate (target language)</label>
             <select
               id="upload-lang"
@@ -138,47 +166,28 @@ export function UploadPanel({ open, onClose }: UploadPanelProps): ReactElement |
               ))}
             </select>
           </div>
-          <div className={styles.speakersField} title="Optional hint for how many distinct voices to expect">
-            <label htmlFor="upload-num-speakers">Speakers</label>
-            <input
-              id="upload-num-speakers"
-              type="number"
-              data-testid="upload-num-speakers"
-              min={1}
-              max={10}
-              placeholder="auto"
-              value={numSpeakers}
-              onChange={(e) => setNumSpeakers(e.target.value)}
-            />
-          </div>
-          <div>
-            <button
-              type="button"
-              onClick={doTranscribe}
-              disabled={!file || transcribeState.isLoading}
-            >
-              {transcribeState.isLoading ? "Transcribing..." : "Transcribe"}
-            </button>
-            <button
-              type="button"
-              onClick={doTranscribeAndTranslate}
-              disabled={!file || translateState.isLoading}
-            >
-              {translateState.isLoading
-                ? "Transcribing & translating..."
-                : "Transcribe & Translate"}
-            </button>
-          </div>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={doTranscribeAndTranslate}
+            disabled={!file || translateState.isLoading}
+          >
+            {translateState.isLoading
+              ? "Transcribing & translating..."
+              : "Transcribe & Translate"}
+          </button>
         </div>
 
-        {transcribeResult && <div className={styles.result}>{transcribeResult}</div>}
+        {transcribeResult && (
+          <TranscriptTurns turns={transcribeResult} emptyText="(no transcription)" />
+        )}
         {transcribeState.isError && (
           <div className={styles.errorText} data-testid="upload-transcribe-error">
             {formatUploadError(transcribeState.error)}
           </div>
         )}
 
-        {translateResult && <div className={styles.result}>{translateResult}</div>}
+        {translateResult && <TranscriptTurns turns={translateResult} emptyText="(no translation)" />}
         {translateState.isError && (
           <div className={styles.errorText} data-testid="upload-translate-error">
             {formatUploadError(translateState.error)}

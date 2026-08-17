@@ -109,6 +109,8 @@ def rt_config(sample_rate=16000, language_hints=None, num_speakers=None):
 
 
 TTS_WS_URL = "wss://tts-rt.soniox.com/tts-websocket"
+# v1, not v2: server.py's voice list ("Maya", "Adrian") is v1's roster -
+# "Maya" doesn't exist on tts-rt-v2 (confirmed against GET /v1/tts-models).
 TTS_MODEL = "tts-rt-v1"
 TTS_SAMPLE_RATE = 24000  # Soniox TTS default for pcm_s16le
 
@@ -201,7 +203,13 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
             raise RuntimeError('simulated upstream runtime error (TEST_FAKE_TRANSCRIBE_MODE)')
         if fake_mode == 'ok':
             if target_language:
-                return [{"speaker": "spk1", "text": "Bonjour le monde", "start": 0.0, "end": 1.0}]
+                return [{
+                    "speaker": "spk1",
+                    "text": "Hello world",
+                    "translation": "Bonjour le monde",
+                    "start": 0.0,
+                    "end": 1.0,
+                }]
             return [{"speaker": "spk1", "text": "Hello world", "start": 0.0, "end": 1.0}]
 
     job_id = None
@@ -278,8 +286,9 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
             raise RuntimeError(f"failed to fetch transcript: {e}")
 
         if target_language:
+            original_tokens = [t for t in tokens if t.get("translation_status") != "translation"]
             trans_tokens = [t for t in tokens if t.get("translation_status") == "translation"]
-            return merge_tokens(trans_tokens)
+            return merge_translated_turns(original_tokens, trans_tokens)
 
         return merge_tokens(tokens)
     finally:
@@ -307,4 +316,34 @@ def merge_tokens(tokens):
             )
     for turn in turns:
         turn["text"] = turn["text"].strip()
+    return turns
+
+
+def merge_translated_turns(original_tokens, trans_tokens):
+    """Pair original-language turns with their translations for
+    /transcribe/translate, so the caller gets both instead of just the
+    translation.
+
+    Original and translation tokens are merged into turns separately (via
+    merge_tokens) rather than interleaved in one pass, since the two streams'
+    relative ordering in the token list isn't guaranteed. Both streams
+    segment the same underlying audio/diarization, so they line up
+    index-for-index in the normal case; a count mismatch just means a
+    trailing turn is missing its text or its translation rather than
+    crashing.
+    """
+    original_turns = merge_tokens(original_tokens)
+    trans_turns = merge_tokens(trans_tokens)
+    turns = []
+    for i in range(max(len(original_turns), len(trans_turns))):
+        orig = original_turns[i] if i < len(original_turns) else None
+        trans = trans_turns[i] if i < len(trans_turns) else None
+        base = orig or trans
+        turns.append({
+            "speaker": base["speaker"],
+            "text": orig["text"] if orig else "",
+            "translation": trans["text"] if trans else "",
+            "start": base["start"],
+            "end": base["end"],
+        })
     return turns

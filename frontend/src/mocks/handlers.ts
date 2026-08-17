@@ -11,6 +11,7 @@ export const sampleRecordings: Recording[] = [
     duration: 125,
     turn_count: 4,
     preview: "Let's talk about the launch plan",
+    source: "transcribe",
   },
 ];
 

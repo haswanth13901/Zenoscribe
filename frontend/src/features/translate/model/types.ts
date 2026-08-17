@@ -62,7 +62,8 @@ export type ServerMessage =
   | { type: "audio_end" }
   | { type: "utterance_end"; speaker?: string | null; language?: string | null }
   | { type: "timeout"; message?: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "tts_error"; message: string };
 
 export type TranslateEvent =
   | { type: "start-requested" }

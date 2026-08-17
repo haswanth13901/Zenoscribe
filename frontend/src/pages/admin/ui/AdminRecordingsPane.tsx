@@ -5,7 +5,9 @@ import {
   useLazyGetTranscriptQuery,
   useDeleteRecordingMutation,
 } from "@/entities/recording/api/recordingsApi";
-import type { Recording } from "@/entities/recording/model/types";
+import type { Recording, RecordingSource } from "@/entities/recording/model/types";
+import { RECORDING_SOURCE_LABELS } from "@/entities/recording/model/types";
+import { RecordingSourceTag } from "@/entities/recording/ui/RecordingSourceTag";
 import { useGetUsersQuery } from "@/entities/user/api/usersApi";
 import { downloadAuthenticated, triggerBlobDownload } from "@/shared/lib/download";
 import { fmtDate } from "@/shared/lib/fmtDate";
@@ -60,6 +62,9 @@ function RecordingRow({
     <tr>
       <td>{fmtDate(recording.started_at)}</td>
       <td>{recording.username}</td>
+      <td>
+        <RecordingSourceTag source={recording.source} />
+      </td>
       <td>{fmtDur(recording.duration)}</td>
       <td>{recording.turn_count}</td>
       <td className={styles.preview}>{recording.preview || "—"}</td>
@@ -85,6 +90,7 @@ function RecordingRow({
 // built on the same recordingsApi hooks and lib/download.ts utilities.
 export function AdminRecordingsPane(): ReactElement {
   const [userId, setUserId] = useState("");
+  const [source, setSource] = useState<RecordingSource | "">("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -100,12 +106,14 @@ export function AdminRecordingsPane(): ReactElement {
     refetch,
   } = useGetRecordingsQuery({
     user_id: userId || undefined,
+    source: source || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
 
   function clearFilters() {
     setUserId("");
+    setSource("");
     setDateFrom("");
     setDateTo("");
   }
@@ -121,6 +129,21 @@ export function AdminRecordingsPane(): ReactElement {
             {users?.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.username}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="rec-filter-type">Type</label>
+          <select
+            id="rec-filter-type"
+            value={source}
+            onChange={(e) => setSource(e.target.value as RecordingSource | "")}
+          >
+            <option value="">All types</option>
+            {(Object.keys(RECORDING_SOURCE_LABELS) as RecordingSource[]).map((s) => (
+              <option key={s} value={s}>
+                {RECORDING_SOURCE_LABELS[s]}
               </option>
             ))}
           </select>
@@ -174,6 +197,7 @@ export function AdminRecordingsPane(): ReactElement {
             <tr>
               <th>When</th>
               <th>User</th>
+              <th>Type</th>
               <th>Length</th>
               <th>Turns</th>
               <th>Preview</th>

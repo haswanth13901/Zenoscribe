@@ -62,6 +62,13 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
 
     case "captions": {
       const { source, translation, speaker, language, ts } = event;
+      const last = state.utterances[state.utterances.length - 1];
+      // Soniox payloads with no new tokens (e.g. a silent frame right after
+      // the previous utterance closed) still trigger a captions message.
+      // With no live utterance to patch, that would otherwise spawn a new
+      // card with no speaker/text - just a dangling timestamp - especially
+      // during crosstalk between two speakers. Drop it instead.
+      if (!(last && last.live) && !source && !translation) return state;
       return {
         ...state,
         utterances: upsertLast(

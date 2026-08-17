@@ -1,7 +1,13 @@
 import { baseApi } from "@/shared/api/baseApi";
 
 export interface TranscribeTurn {
+  speaker: string;
   text: string;
+  /** Present only when a target language was requested - the translated
+   * text for this turn, shown under the original. */
+  translation?: string;
+  start?: number | null;
+  end?: number | null;
 }
 
 export interface TranscribeResponse {

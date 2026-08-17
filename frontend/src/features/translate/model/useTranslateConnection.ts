@@ -212,6 +212,11 @@ export function useTranslateConnection() {
           } else if (m.type === "error") {
             dispatch({ type: "server-error", message: m.message });
             teardown();
+          } else if (m.type === "tts_error") {
+            // Scoped to one utterance's spoken-audio stream - the live
+            // session (captions, mic) keeps going even if this one
+            // sentence couldn't be spoken aloud.
+            console.warn("translate: TTS failed for one utterance:", m.message);
           }
           // audio_end: no-op, matches the original (no handler for it either).
         };

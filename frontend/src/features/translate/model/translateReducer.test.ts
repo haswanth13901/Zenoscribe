@@ -126,6 +126,52 @@ describe("translateReducer", () => {
       expect(state.utterances[0]).toMatchObject({ source: "a", live: false });
       expect(state.utterances[1]).toMatchObject({ source: "b", live: true });
     });
+
+    it("drops an empty caption frame when there's no live utterance to patch", () => {
+      // e.g. a Soniox payload with no new tokens, arriving right after the
+      // previous utterance closed - shouldn't spawn a speaker-less,
+      // text-less card with just a timestamp.
+      let state = translateReducer(initialTranslateState, {
+        type: "captions",
+        source: "a",
+        translation: "a",
+        speaker: "user-1",
+        language: "es",
+        ts: 1000,
+      });
+      state = translateReducer(state, { type: "utterance-end", speaker: "user-1", language: "es" });
+      state = translateReducer(state, {
+        type: "captions",
+        source: "",
+        translation: "",
+        speaker: null,
+        language: null,
+        ts: 2000,
+      });
+      expect(state.utterances).toHaveLength(1);
+      expect(state.utterances[0]).toMatchObject({ source: "a", live: false });
+    });
+
+    it("still patches an already-live utterance even if the new frame is empty", () => {
+      let state = translateReducer(initialTranslateState, {
+        type: "captions",
+        source: "a",
+        translation: "a",
+        speaker: "user-1",
+        language: "es",
+        ts: 1000,
+      });
+      state = translateReducer(state, {
+        type: "captions",
+        source: "",
+        translation: "",
+        speaker: null,
+        language: null,
+        ts: 2000,
+      });
+      expect(state.utterances).toHaveLength(1);
+      expect(state.utterances[0]).toMatchObject({ source: "", translation: "", live: true, ts: 1000 });
+    });
   });
 
   describe("audio-start", () => {

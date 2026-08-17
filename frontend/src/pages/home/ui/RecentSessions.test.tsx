@@ -15,6 +15,7 @@ function rec(id: string, overrides: Partial<Recording> = {}): Recording {
     duration: 65,
     turn_count: 3,
     preview: `preview ${id}`,
+    source: "transcribe",
     ...overrides,
   };
 }

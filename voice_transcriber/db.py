@@ -18,6 +18,11 @@ from . import config as app_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The set of valid `recordings.source` values - what produced the recording.
+# Kept here (not just as a DB CHECK constraint) so routes_api.py can validate
+# an incoming filter value without a round-trip to Postgres.
+RECORDING_SOURCES = ("transcribe", "translate", "upload")
+
 _pool: Optional[ConnectionPool] = None
 
 
@@ -243,14 +248,18 @@ def count_admins():
 
 
 def add_recording(rec_id, user_id, wav_file, txt_file, started_at,
-                  duration, turn_count, preview):
-    """Insert or update a recording entry (idempotent on rec_id)."""
+                  duration, turn_count, preview, source):
+    """Insert or update a recording entry (idempotent on rec_id).
+
+    `source` is required (one of RECORDING_SOURCES) rather than defaulted,
+    so a caller can't silently omit it and get a value that hides the bug.
+    """
     with _get_pool().connection() as conn:
         conn.execute(
             """INSERT INTO recordings
                (id, user_id, wav_file, txt_file, started_at,
-                duration, turn_count, preview)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                duration, turn_count, preview, source)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (id) DO UPDATE
                SET user_id = EXCLUDED.user_id,
                    wav_file = EXCLUDED.wav_file,
@@ -258,17 +267,20 @@ def add_recording(rec_id, user_id, wav_file, txt_file, started_at,
                    started_at = EXCLUDED.started_at,
                    duration = EXCLUDED.duration,
                    turn_count = EXCLUDED.turn_count,
-                   preview = EXCLUDED.preview""",
+                   preview = EXCLUDED.preview,
+                   source = EXCLUDED.source""",
             (rec_id, user_id, wav_file, txt_file, _parse_ts(started_at),
-             duration, turn_count, preview),
+             duration, turn_count, preview, source),
         )
 
 
-def list_recordings(user_id=None, date_from=None, date_to=None, limit=200):
+def list_recordings(user_id=None, date_from=None, date_to=None, source=None, limit=200):
     """user_id=None returns every recording (admin view).
 
     date_from / date_to are ISO date strings (YYYY-MM-DD), interpreted as
-    UTC calendar days. The range is inclusive of both ends.
+    UTC calendar days. The range is inclusive of both ends. Raises ValueError
+    on a malformed date string - callers (routes_api.py) are expected to
+    translate that into an HTTP 400 rather than letting it become a 500.
     """
     where = []
     params = []
@@ -284,6 +296,9 @@ def list_recordings(user_id=None, date_from=None, date_to=None, limit=200):
             datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             + timedelta(days=1)
         )
+    if source:
+        where.append("r.source = %s")
+        params.append(source)
 
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     params.append(limit)

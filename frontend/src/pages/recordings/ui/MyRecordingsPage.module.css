@@ -38,6 +38,7 @@
   margin: 0 0 6px;
 }
 
+.filters select,
 .filters input[type="date"] {
   width: 100%;
   background: var(--field-bg);

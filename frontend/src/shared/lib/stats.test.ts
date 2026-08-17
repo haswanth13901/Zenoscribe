@@ -11,6 +11,7 @@ function rec(overrides: Partial<Recording>): Recording {
     duration: 0,
     turn_count: 0,
     preview: "",
+    source: "transcribe",
     ...overrides,
   };
 }

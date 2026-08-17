@@ -1,7 +1,7 @@
 .toolbar {
   padding: 10px 20px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-end;
   gap: 8px;
   flex: none;
@@ -34,27 +34,26 @@
   }
 }
 
-.speakersField {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--muted);
+.field {
+  composes: field from "../../../shared/ui/toolbarField.module.css";
 }
 
-.speakersField input {
-  width: 52px;
-  padding: 5px 6px;
-  border-radius: 6px;
-  background: var(--field-bg);
-  color: var(--text);
-  border: 1px solid var(--field-border);
+.field input[type="number"] {
+  width: 72px;
+}
+
+.toggleBtn {
+  composes: button from "../../../shared/ui/toolbarField.module.css";
 }
 
 .toggleBtn.rec {
   background: var(--rec);
   border-color: var(--rec);
   color: #fff;
+}
+
+.button {
+  composes: button from "../../../shared/ui/toolbarField.module.css";
 }
 
 .main {

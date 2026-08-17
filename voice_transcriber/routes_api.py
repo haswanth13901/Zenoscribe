@@ -7,8 +7,13 @@ auth.user_from_ws() to identify the speaker at connection time.
 
 import asyncio
 import logging
+import mimetypes
 import os
+import shutil
 import tempfile
+import uuid
+import wave
+from datetime import datetime
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status,
@@ -246,6 +251,7 @@ def _rec_json(r):
         "duration": round(r["duration"], 1),
         "turn_count": r["turn_count"],
         "preview": r["preview"],
+        "source": r["source"],
     }
 
 
@@ -254,14 +260,27 @@ async def list_recordings(
     user_id: str = None,
     date_from: str = None,
     date_to: str = None,
+    source: str = None,
     user=Depends(auth.current_user),
 ):
     """Users see only their own. Admins see all, optionally filtered by user.
-    Both roles can filter by an inclusive date range (YYYY-MM-DD)."""
+    All roles can additionally filter by an inclusive date range (YYYY-MM-DD)
+    and/or by recording source. An unrecognized source or a malformed date
+    is a 400, not a 500 (unguarded strptime) or a silently empty list."""
+    if source is not None and source not in db.RECORDING_SOURCES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Invalid source; must be one of {', '.join(db.RECORDING_SOURCES)}",
+        )
     scope = user_id if user["role"] == "admin" else user["id"]
-    rows = db.list_recordings(
-        user_id=scope, date_from=date_from, date_to=date_to
-    )
+    try:
+        rows = db.list_recordings(
+            user_id=scope, date_from=date_from, date_to=date_to, source=source
+        )
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Invalid date_from/date_to; expected YYYY-MM-DD"
+        )
     return [_rec_json(r) for r in rows]
 
 
@@ -290,8 +309,12 @@ async def get_audio(rec_id: str, user=Depends(auth.current_user)):
     path = config.RECORDINGS / row["wav_file"]
     if not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Audio missing")
+    # Recordings from the batch-upload flow keep their original extension
+    # (mp3, etc), unlike live sessions which are always .wav - guess the
+    # content type instead of assuming .wav for everything.
+    media_type = mimetypes.guess_type(path.name)[0] or "audio/wav"
     return FileResponse(
-        path, media_type="audio/wav", filename=f"{rec_id}.wav"
+        path, media_type=media_type, filename=f"{rec_id}{path.suffix}"
     )
 
 
@@ -308,12 +331,78 @@ async def remove_recording(rec_id: str, user=Depends(auth.current_user)):
     return {"ok": True}
 
 
+def _persist_upload_recording(user, tmp_path, suffix, turns) -> bool:
+    """Move a successfully-transcribed upload into permanent storage and
+    register it as a recording, mirroring how transcribe.py/translate.py
+    persist their live sessions - the batch-upload flow previously
+    discarded both the audio and the transcript once the response was
+    sent, so nothing showed up in My/All Recordings.
+
+    Best-effort: storage/DB failures are logged, not raised, so a hiccup
+    here doesn't turn an otherwise-successful transcription into a 500 for
+    the caller. Returns True if the temp file was moved (so the caller
+    shouldn't also try to unlink it), False if nothing was persisted (empty
+    result, or the move itself failed) and the caller's own cleanup should
+    run instead.
+
+    Turns may or may not carry a "translation" key (present only for
+    /transcribe/translate) - the transcript and preview include it when
+    present, matching translate.py's live-session format.
+    """
+    if not turns:
+        return False
+
+    started_at = datetime.now()
+    stamp = started_at.strftime("%Y%m%d-%H%M%S")
+    session = f"{stamp}-{user['username']}-upload-{uuid.uuid4().hex[:6]}"
+    audio_path = config.RECORDINGS / f"{session}{suffix}"
+    txt_path = config.RECORDINGS / f"{session}.txt"
+
+    try:
+        shutil.move(tmp_path, audio_path)
+    except OSError:
+        log.exception("could not store uploaded audio %s", audio_path)
+        return False
+
+    lines = []
+    for t in turns:
+        speaker = t.get("speaker") or "user-1"
+        start = t.get("start") or 0.0
+        line = f"[{start:.1f}s] {speaker}: {t.get('text', '')}"
+        if "translation" in t:
+            line += f"\n    -> {t['translation']}"
+        lines.append(line)
+    try:
+        txt_path.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        log.exception("could not write upload transcript %s", txt_path)
+
+    duration = 0.0
+    if suffix.lower() == ".wav":
+        try:
+            with wave.open(str(audio_path), "rb") as wf:
+                duration = wf.getnframes() / float(wf.getframerate() or 1)
+        except (wave.Error, OSError):
+            log.exception("could not read wav duration %s", audio_path)
+
+    preview = " ".join(t.get("translation") or t.get("text", "") for t in turns)[:160]
+    try:
+        db.add_recording(
+            session, user["id"], audio_path.name, txt_path.name,
+            started_at.isoformat(), duration, len(turns), preview, "upload",
+        )
+    except Exception:
+        log.exception("could not register upload recording %s", session)
+
+    return True
+
+
 @router.post("/api/transcribe")
 async def transcribe_upload(
     request: Request,
     file: UploadFile = File(...),
     num_speakers: int = Form(None),
-    _=Depends(auth.current_user),
+    user=Depends(auth.current_user),
 ):
     """Batch endpoint - upload a wav/mp3, get turns back."""
     content_length = request.headers.get("content-length")
@@ -349,7 +438,6 @@ async def transcribe_upload(
 
         try:
             turns = await asyncio.to_thread(sx.transcribe_file, path, num_speakers=num_speakers)
-            return {"turns": turns}
         except TimeoutError as e:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")
         except RuntimeError as e:
@@ -357,6 +445,10 @@ async def transcribe_upload(
         except Exception as e:
             log.exception("unexpected error during transcription: %s", e)
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal transcription error")
+
+        if await asyncio.to_thread(_persist_upload_recording, user, path, suffix, turns):
+            path = None  # ownership moved to permanent storage
+        return {"turns": turns}
     finally:
         if path:
             try:
@@ -371,7 +463,7 @@ async def transcribe_and_translate(
     file: UploadFile = File(...),
     target_language: str = None,
     num_speakers: int = Form(None),
-    _=Depends(auth.current_user),
+    user=Depends(auth.current_user),
 ):
     """Upload audio, run STT and server-side one-way translation (Soniox), and
     return translated speaker turns. If target_language is omitted, behaves
@@ -411,7 +503,6 @@ async def transcribe_and_translate(
             turns = await asyncio.to_thread(
                 sx.transcribe_file, path, target_language=target_language, num_speakers=num_speakers
             )
-            return {"turns": turns}
         except TimeoutError as e:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")
         except RuntimeError as e:
@@ -419,6 +510,10 @@ async def transcribe_and_translate(
         except Exception as e:
             log.exception("unexpected error during transcribe+translate: %s", e)
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal transcription error")
+
+        if await asyncio.to_thread(_persist_upload_recording, user, path, suffix, turns):
+            path = None  # ownership moved to permanent storage
+        return {"turns": turns}
     finally:
         if path:
             try:

@@ -186,6 +186,7 @@ def test_admin_page_recordings_tab_download_and_delete(live_server):
             duration=9.5,
             turn_count=1,
             preview="admin-visible recording",
+            source="transcribe",
         )
 
         with sync_playwright() as p:

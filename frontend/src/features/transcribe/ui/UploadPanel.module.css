@@ -7,7 +7,7 @@
 .card {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 11px;
+  padding: 16px;
   background: var(--panel);
 }
 
@@ -15,63 +15,37 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .filename {
   font-size: 12px;
   color: var(--muted);
+  margin-top: 8px;
 }
 
 .row {
-  margin-top: 8px;
+  margin-top: 14px;
   display: flex;
-  gap: 8px;
-  align-items: center;
+  gap: 16px;
+  align-items: flex-end;
   flex-wrap: wrap;
 }
 
-.langField {
-  min-width: 180px;
+.field {
+  composes: field from "../../../shared/ui/toolbarField.module.css";
 }
 
-.langField label {
-  display: block;
-  font-size: 11px;
-  color: var(--muted);
-  margin-bottom: 2px;
-}
-
-.langField select {
+.field select {
   min-width: 160px;
-  padding: 6px;
-  border-radius: 6px;
-  background: var(--field-bg);
-  color: var(--text);
-  border: 1px solid var(--field-border);
 }
 
-.speakersField label {
-  display: block;
-  font-size: 11px;
-  color: var(--muted);
-  margin-bottom: 2px;
+.field input[type="number"] {
+  width: 72px;
 }
 
-.speakersField input {
-  width: 60px;
-  padding: 6px;
-  border-radius: 6px;
-  background: var(--field-bg);
-  color: var(--text);
-  border: 1px solid var(--field-border);
-}
-
-.result {
-  margin-top: 10px;
-  color: var(--text);
-  font-size: 13.5px;
-  line-height: 1.5;
+.button {
+  composes: button from "../../../shared/ui/toolbarField.module.css";
 }
 
 .errorText {

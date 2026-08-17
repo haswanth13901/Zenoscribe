@@ -1,5 +1,5 @@
 import { configureStore } from "@reduxjs/toolkit";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Provider } from "react-redux";
@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { baseApi } from "@/shared/api/baseApi";
 import authReducer, { setCredentials } from "@/features/auth/model/authSlice";
 import type { AuthUser } from "@/features/auth/model/types";
+import { RECORDING_SOURCE_LABELS } from "@/entities/recording/model/types";
 import { sampleRecordings } from "@/mocks/handlers";
 import { server } from "@/mocks/server";
 import { MyRecordingsPage } from "@/pages/recordings/ui/MyRecordingsPage";
@@ -90,5 +91,40 @@ describe("MyRecordingsPage", () => {
     expect(from.value).toBe("2026-01-01");
     await userEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(from.value).toBe("");
+  });
+
+  it("renders a type badge for each recording", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
+    const row = screen.getByText(sampleRecordings[0].preview).closest("tr")!;
+    expect(
+      within(row).getByText(RECORDING_SOURCE_LABELS[sampleRecordings[0].source]),
+    ).toBeInTheDocument();
+  });
+
+  it("refetches with the selected type filter", async () => {
+    let lastUrl = "";
+    server.use(
+      http.get("/api/recordings", ({ request }) => {
+        lastUrl = request.url;
+        return HttpResponse.json(sampleRecordings);
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
+
+    await userEvent.selectOptions(screen.getByLabelText("Type"), "translate");
+
+    await waitFor(() => expect(lastUrl).toContain("source=translate"));
+  });
+
+  it("clears the type filter via the Clear button", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
+    const typeSelect = screen.getByLabelText("Type") as HTMLSelectElement;
+    await userEvent.selectOptions(typeSelect, "translate");
+    expect(typeSelect.value).toBe("translate");
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(typeSelect.value).toBe("");
   });
 });
