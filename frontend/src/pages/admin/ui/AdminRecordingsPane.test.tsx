@@ -87,7 +87,7 @@ describe("AdminRecordingsPane", () => {
     ).toBeInTheDocument();
   });
 
-  it("refetches with the selected type filter on Apply", async () => {
+  it("refetches with the selected type filter", async () => {
     let lastUrl = "";
     server.use(
       http.get("/api/recordings", ({ request }) => {
@@ -99,18 +99,17 @@ describe("AdminRecordingsPane", () => {
     await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
 
     await userEvent.selectOptions(screen.getByLabelText("Type"), "translate");
-    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() => expect(lastUrl).toContain("source=translate"));
   });
 
-  it("clears the type filter via the Clear button", async () => {
+  it("resets the type filter by selecting All types", async () => {
     renderPane();
     await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
     const typeSelect = screen.getByLabelText("Type") as HTMLSelectElement;
     await userEvent.selectOptions(typeSelect, "translate");
     expect(typeSelect.value).toBe("translate");
-    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await userEvent.selectOptions(typeSelect, "");
     expect(typeSelect.value).toBe("");
   });
 });

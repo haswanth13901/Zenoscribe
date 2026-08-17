@@ -83,13 +83,13 @@ describe("MyRecordingsPage", () => {
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
   });
 
-  it("clears date filters via the Clear button", async () => {
+  it("clears the From date filter by clearing the input", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
     const from = screen.getByLabelText("From") as HTMLInputElement;
     await userEvent.type(from, "2026-01-01");
     expect(from.value).toBe("2026-01-01");
-    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await userEvent.clear(from);
     expect(from.value).toBe("");
   });
 
@@ -118,13 +118,13 @@ describe("MyRecordingsPage", () => {
     await waitFor(() => expect(lastUrl).toContain("source=translate"));
   });
 
-  it("clears the type filter via the Clear button", async () => {
+  it("resets the type filter by selecting All types", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(sampleRecordings[0].preview)).toBeInTheDocument());
     const typeSelect = screen.getByLabelText("Type") as HTMLSelectElement;
     await userEvent.selectOptions(typeSelect, "translate");
     expect(typeSelect.value).toBe("translate");
-    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await userEvent.selectOptions(typeSelect, "");
     expect(typeSelect.value).toBe("");
   });
 });
