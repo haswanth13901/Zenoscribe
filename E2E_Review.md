@@ -32,14 +32,20 @@ suite), and **frontend-unit** (Vitest).
 
 ## Open items
 
-1. **Recordings storage at multi-instance scale.** Fine for a single
-   container (a named Docker volume covers it — see README's Production
-   section). If this ever runs as more than one instance at once
-   (load-balanced replicas, etc.), a local volume isn't shared across
-   instances — needs S3-compatible object storage, plus pinning
-   `SERVER_BOOT_ID` (`auth.py`) across instances so sessions don't randomly
-   invalidate when a request lands on a different one. Revisit if/when real
-   scale needs come up — not worth building ahead of that.
+1. **Multi-instance scale — three things assume a single process today.**
+   Fine for a single container (a named Docker volume covers recordings —
+   see README's Production section). If this ever runs as more than one
+   instance at once (load-balanced replicas, etc.), all three need
+   revisiting: (a) a local volume isn't shared across instances, needs
+   S3-compatible object storage; (b) `SERVER_BOOT_ID` (`auth.py`) is
+   generated per-process, so sessions randomly invalidate when a request
+   lands on a different instance; (c) rate limiting (`rate_limit.py`) is an
+   in-memory counter per-process, so a per-user limit effectively multiplies
+   by instance count instead of being enforced globally (a user could get N×
+   their intended quota by getting round-robined across N instances - not a
+   security hole on its own, just a soft cap that stops being precise).
+   Revisit if/when real scale needs come up — not worth building ahead of
+   that.
 2. **Secret rotation.** Code-side guards exist (production refuses to boot
    on a missing/weak `DATABASE_URL`/`JWT_SECRET`/`ADMIN_PASSWORD`, or with
    `ALLOW_TEST_HOOKS=true`). What's left is manual: rotate the live Soniox

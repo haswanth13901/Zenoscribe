@@ -161,3 +161,25 @@ def test_non_admin_cannot_access_admin_endpoints(client, make_user):
     headers = _login(client, "oscar", "OscarPass123!")
     r = client.get("/api/admin/users", headers=headers)
     assert r.status_code == 403
+
+
+def test_admin_write_rate_limit_then_429(client, make_user):
+    """Proves rate_limit.per_user() is actually wired into a real route via
+    Depends() and produces a real 429 over HTTP, not just that the pure
+    limiter function works in isolation (see test_rate_limit.py for that).
+    The rate-limit dependency runs before the route body, so it 429s on
+    attempt 61 even though every one of these targets a user id that
+    doesn't exist (each would otherwise 404)."""
+    make_user("rl_admin", "RlAdminPass123!", role="admin")
+    headers = _login(client, "rl_admin", "RlAdminPass123!")
+    for i in range(60):
+        r = client.post(
+            "/api/admin/users/nonexistent-id/active",
+            headers=headers, json={"is_active": True},
+        )
+        assert r.status_code == 404, f"attempt {i + 1} expected 404, got {r.status_code}"
+    r = client.post(
+        "/api/admin/users/nonexistent-id/active",
+        headers=headers, json={"is_active": True},
+    )
+    assert r.status_code == 429

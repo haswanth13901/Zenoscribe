@@ -22,6 +22,7 @@ try:
     from . import config
     from . import db
     from . import languages
+    from . import rate_limit
     from . import routes_api
     from . import transcribe
     from . import translate
@@ -30,6 +31,7 @@ except ImportError:  # run flat from inside the package dir
     import config
     import db
     import languages
+    import rate_limit
     import routes_api
     import transcribe
     import translate
@@ -38,6 +40,10 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("server")
 
 app = FastAPI(title="Zenoscribe")
+# Per-IP safety net on every request/WS handshake - see rate_limit.py.
+# Specific expensive endpoints (uploads, WS connects) have their own
+# tighter per-user limits declared where they're defined.
+app.add_middleware(rate_limit.GlobalRateLimitMiddleware)
 
 
 @app.on_event("startup")

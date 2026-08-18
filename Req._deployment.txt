@@ -46,10 +46,15 @@ redeployed (a plain restart is fine; replacing the container is not).
 
   [ ] If you plan to run more than one container instance at once
       (load-balanced replicas, etc.) instead of a single container: STOP —
-      a local volume isn't shared across instances, so recordings saved by
-      one instance are invisible to another. That needs S3-compatible
-      object storage instead (not yet implemented — flag this back to the
-      dev team before scaling out).
+      three things in the app assume a single process and all need
+      revisiting first: recordings storage (a local volume isn't shared
+      across instances), session validity (SERVER_BOOT_ID is generated
+      per-process, so users get randomly logged out when a request lands on
+      a different instance), and rate limiting (counters are in-memory per
+      process, so per-user limits effectively multiply by instance count
+      instead of being enforced globally). None of these are implemented
+      for multi-instance yet — flag this back to the dev team before
+      scaling out.
 
 3. HTTPS/TLS (required — not optional)
 ---------------------------------------------------------------------------

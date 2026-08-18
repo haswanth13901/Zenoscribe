@@ -25,11 +25,13 @@ try:
     from . import auth
     from . import config
     from . import db
+    from . import rate_limit
     from . import soniox_client as sx
 except ImportError:  # run flat from inside the package dir
     import auth
     import config
     import db
+    import rate_limit
     import soniox_client as sx
 
 log = logging.getLogger("api")
@@ -119,7 +121,11 @@ async def admin_list_users(_=Depends(auth.current_admin)):
 
 
 @router.post("/api/admin/users")
-async def admin_create_user(body: NewUserBody, admin=Depends(auth.current_admin)):
+async def admin_create_user(
+    body: NewUserBody,
+    admin=Depends(auth.current_admin),
+    _rl=Depends(rate_limit.per_user(60, 60, "admin-write")),
+):
     if not body.username.strip() or len(body.password) < auth.MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -142,7 +148,10 @@ async def admin_create_user(body: NewUserBody, admin=Depends(auth.current_admin)
 
 @router.post("/api/admin/users/{user_id}/password")
 async def admin_reset_password(
-    user_id: str, body: PasswordBody, _=Depends(auth.current_admin)
+    user_id: str,
+    body: PasswordBody,
+    _=Depends(auth.current_admin),
+    _rl=Depends(rate_limit.per_user(60, 60, "admin-write")),
 ):
     if len(body.password) < auth.MIN_PASSWORD_LENGTH:
         raise HTTPException(
@@ -157,7 +166,10 @@ async def admin_reset_password(
 
 @router.post("/api/admin/users/{user_id}/active")
 async def admin_set_active(
-    user_id: str, body: ActiveBody, admin=Depends(auth.current_admin)
+    user_id: str,
+    body: ActiveBody,
+    admin=Depends(auth.current_admin),
+    _rl=Depends(rate_limit.per_user(60, 60, "admin-write")),
 ):
     target = db.get_user(user_id)
     if not target:
@@ -184,7 +196,11 @@ async def admin_set_active(
 
 
 @router.delete("/api/admin/users/{user_id}")
-async def admin_delete_user(user_id: str, admin=Depends(auth.current_admin)):
+async def admin_delete_user(
+    user_id: str,
+    admin=Depends(auth.current_admin),
+    _rl=Depends(rate_limit.per_user(60, 60, "admin-write")),
+):
     target = db.get_user(user_id)
     if not target:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
@@ -262,6 +278,7 @@ async def list_recordings(
     date_to: str = None,
     source: str = None,
     user=Depends(auth.current_user),
+    _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
 ):
     """Users see only their own. Admins see all, optionally filtered by user.
     All roles can additionally filter by an inclusive date range (YYYY-MM-DD)
@@ -295,7 +312,11 @@ def _authorize_recording(rec_id, user):
 
 
 @router.get("/api/recordings/{rec_id}/transcript")
-async def get_transcript(rec_id: str, user=Depends(auth.current_user)):
+async def get_transcript(
+    rec_id: str,
+    user=Depends(auth.current_user),
+    _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
+):
     row = _authorize_recording(rec_id, user)
     path = config.RECORDINGS / row["txt_file"]
     if not path.exists():
@@ -304,7 +325,11 @@ async def get_transcript(rec_id: str, user=Depends(auth.current_user)):
 
 
 @router.get("/api/recordings/{rec_id}/audio")
-async def get_audio(rec_id: str, user=Depends(auth.current_user)):
+async def get_audio(
+    rec_id: str,
+    user=Depends(auth.current_user),
+    _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
+):
     row = _authorize_recording(rec_id, user)
     path = config.RECORDINGS / row["wav_file"]
     if not path.exists():
@@ -319,7 +344,11 @@ async def get_audio(rec_id: str, user=Depends(auth.current_user)):
 
 
 @router.delete("/api/recordings/{rec_id}")
-async def remove_recording(rec_id: str, user=Depends(auth.current_user)):
+async def remove_recording(
+    rec_id: str,
+    user=Depends(auth.current_user),
+    _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
+):
     _authorize_recording(rec_id, user)
     files = db.delete_recording(rec_id)
     if files:
@@ -403,6 +432,7 @@ async def transcribe_upload(
     file: UploadFile = File(...),
     num_speakers: int = Form(None),
     user=Depends(auth.current_user),
+    _rl=Depends(rate_limit.per_user(15, 300, "upload")),
 ):
     """Batch endpoint - upload a wav/mp3, get turns back."""
     content_length = request.headers.get("content-length")
@@ -464,6 +494,7 @@ async def transcribe_and_translate(
     target_language: str = None,
     num_speakers: int = Form(None),
     user=Depends(auth.current_user),
+    _rl=Depends(rate_limit.per_user(15, 300, "upload")),
 ):
     """Upload audio, run STT and server-side one-way translation (Soniox), and
     return translated speaker turns. If target_language is omitted, behaves

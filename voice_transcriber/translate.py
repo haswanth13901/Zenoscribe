@@ -32,12 +32,14 @@ try:
     from . import config
     from . import db
     from . import languages
+    from . import rate_limit
     from . import soniox_client as sx
 except ImportError:  # run flat from inside the package dir
     import auth
     import config
     import db
     import languages
+    import rate_limit
     import soniox_client as sx
 
 log = logging.getLogger("translate")
@@ -62,6 +64,16 @@ async def translate(client: WebSocket):
     ws_user = auth.user_from_token(hello.get("token", "")) if isinstance(hello, dict) else None
     if not ws_user:
         await client.close(code=4401)
+        return
+
+    # Each connection spawns a real Soniox session (real cost, held server
+    # resources) - throttle new connections per user before doing anything
+    # else, same as the upload endpoints' per_user() limit but checked here
+    # directly since WS auth happens via a frame, not a header FastAPI's
+    # Depends() can see.
+    if not rate_limit.hit(f"ws-connect:{ws_user['id']}", 20, 300):
+        await client.send_json({"type": "error", "message": "Too many connection attempts, try again shortly"})
+        await client.close(code=4429)
         return
 
     mode = hello.get("mode", "one_way")

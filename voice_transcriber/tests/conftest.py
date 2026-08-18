@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from voice_transcriber import auth, config, db, soniox_client  # noqa: E402
+from voice_transcriber import auth, config, db, rate_limit, soniox_client  # noqa: E402
 from voice_transcriber.server import app  # noqa: E402
 
 
@@ -100,10 +100,18 @@ def client(isolated_db, isolated_recordings, monkeypatch):
     likewise forced off here so hook-gating tests don't depend on whatever
     the developer's real .env happens to set; tests that need hooks enabled
     monkeypatch it back to True themselves (see test_internal_test_hook.py).
+
+    rate_limit's counters are also cleared here: this fixture's `app` is the
+    one module-level FastAPI instance imported at the top of this file and
+    reused across every fast test, so without a reset, rate_limit's
+    in-memory buckets (keyed by user id / IP, both of which repeat a lot
+    across this suite - many tests share the "testclient" fake IP) would
+    accumulate across the whole run instead of resetting per test.
     """
     monkeypatch.setenv("ADMIN_USERNAME", "seed-admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "Seed-Admin-Password-123")
     monkeypatch.setattr(config, "ALLOW_TEST_HOOKS", False)
+    rate_limit.reset_all()
     with TestClient(app) as c:
         yield c
 

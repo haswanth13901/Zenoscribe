@@ -22,11 +22,13 @@ try:
     from . import auth
     from . import config
     from . import db
+    from . import rate_limit
     from . import soniox_client as sx
 except ImportError:  # run flat from inside the package dir
     import auth
     import config
     import db
+    import rate_limit
     import soniox_client as sx
 
 log = logging.getLogger("transcribe")
@@ -46,6 +48,15 @@ async def live(client: WebSocket):
         return
     user_id = ws_user["id"]
     username = ws_user["username"]
+    # Each connection spawns a real Soniox session (real cost, held server
+    # resources) - throttle new connections per user before doing anything
+    # else, same as the upload endpoints' per_user() limit but checked here
+    # directly since WS auth happens via a frame, not a header FastAPI's
+    # Depends() can see.
+    if not rate_limit.hit(f"ws-connect:{user_id}", 20, 300):
+        await client.send_json({"type": "error", "message": "Too many connection attempts, try again shortly"})
+        await client.close(code=4429)
+        return
     num_speakers = hello.get("num_speakers")
     await client.send_json({"type": "ready"})
     labeler = sx.SpeakerLabeler()
