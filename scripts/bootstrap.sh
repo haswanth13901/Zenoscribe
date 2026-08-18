@@ -10,10 +10,10 @@ python -m venv .venv
 
 echo "[bootstrap] Upgrading pip and installing requirements"
 python -m pip install --upgrade pip
-if [ -f requirements.txt ]; then
-    pip install -r requirements.txt
+if [ -f requirements-dev.txt ]; then
+    pip install -r requirements-dev.txt
 else
-    echo "[bootstrap] WARNING: requirements.txt not found. Install dependencies manually."
+    echo "[bootstrap] WARNING: requirements-dev.txt not found. Install dependencies manually."
 fi
 
 if python -m playwright --version > /dev/null 2>&1; then

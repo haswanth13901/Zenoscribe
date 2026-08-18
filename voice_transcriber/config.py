@@ -39,6 +39,13 @@ if PRODUCTION and not _database_url_env:
     raise RuntimeError("Missing DATABASE_URL in production environment")
 DATABASE_URL = _database_url_env or 'postgresql://zenoscribe:zenoscribe@localhost:5432/zenoscribe'
 
+# Soniox API key. A missing/typo'd key still boots cleanly and passes a
+# health check if this isn't checked here - it only surfaces as an uncaught
+# KeyError (see soniox_client.get_api_key()) the first time a user hits
+# record, which looks like a generic 500 with no clue what's wrong.
+if PRODUCTION and not os.environ.get('SONIOX_API_KEY'):
+    raise RuntimeError("Missing SONIOX_API_KEY in production environment")
+
 # frontend/ is the single source dir for all frontend files; the backend
 # serves the Vite build output straight from frontend/dist/ (no separate
 # static/ copy) - see the repo README's "Frontend" section.

@@ -51,7 +51,7 @@ suite), and **frontend-unit** (Vitest).
    `ALLOW_TEST_HOOKS=true`). What's left is manual: rotate the live Soniox
    key, generate a fresh `JWT_SECRET` and strong `ADMIN_PASSWORD`, and put
    them in `.env.production` or your platform's secret store — never in a
-   committed `.env`. Tracked as a checklist in `Req._deployment.txt` for the
+   committed `.env`. Tracked as a checklist in `DEPLOYMENT.md` for the
    deploy team.
 3. **Real-device testing.** Everything mobile-related has been verified via
    code, automated suites, and a production build — not an actual

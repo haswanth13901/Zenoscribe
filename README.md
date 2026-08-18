@@ -48,8 +48,14 @@ Prerequisites
 
 ```bash
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
+
+`requirements-dev.txt` layers local dev/test tooling (pytest, Playwright,
+flake8/black, plus `record.py`'s CLI-only deps) on top of
+`requirements.txt` via `-r requirements.txt`. `requirements.txt` alone is
+the production-only set — it's what the Dockerfile's production image
+installs; keep dev/test/lint packages out of it.
 
 2) Create an environment file
 
@@ -175,6 +181,35 @@ be set as a real process env var — the app needs it before it knows which
 file to load. `.env.production` is git- and docker-ignored, same as `.env`;
 never commit it.
 
+**What "real process env var" means depends on how you run the app** — this
+trips people up specifically under Compose, so read this if that's your
+path:
+
+- **Bare `uvicorn`/`python`, no container:** `ENV=production` must be set on
+  the shell/process directly (`ENV=production uvicorn ...`). Putting it
+  inside `.env.production` does nothing here — nothing has told the process
+  which file to load yet, so nothing has loaded it.
+- **`docker-compose.prod.yml` (this repo's production Compose file):**
+  `web`'s `env_file: .env.production` line *does* inject every line in that
+  file — `ENV=production` included — as real container process env vars,
+  before the app starts. You do not need to also pass `-e ENV=production`
+  separately; `env_file:` already covers it. This is *not* the same
+  mechanism as the top-level `--env-file .env.production` flag used
+  elsewhere on the `docker compose` command line (that one only affects
+  `${VAR}` substitution inside the YAML file itself, e.g. `${POSTGRES_USER}`
+  — see `docker-compose.prod.yml`'s header comment). Both point at the same
+  file here, but they do different jobs.
+- **Plain `docker run`:** neither `env_file:` nor Compose's `--env-file`
+  apply. Use `--env-file .env.production -e ENV=production` as shown below
+  (or bake `ENV=production` into the image, which this repo does not do).
+
+Getting this wrong is exactly what silently starts the app in
+`development` mode instead of `production` — the generated JWT secret, the
+auto-created admin, and every production fail-fast guard bypassed, with no
+error at startup because development mode is a valid mode. See
+DEPLOYMENT.md's gate checklist for how to prove this didn't happen
+(blank out `JWT_SECRET` and confirm the app refuses to start).
+
 Start (example):
 
 ```bash
@@ -183,7 +218,22 @@ Start (example):
 ENV=production uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-Docker (example):
+Docker Compose (recommended — this is what `docker-compose.prod.yml` and
+`Caddyfile` in this repo are set up for; single VM behind Caddy for TLS):
+
+```bash
+cp .env.production.example .env.production   # fill in real values
+# edit Caddyfile: replace your-domain.example.com with your real domain
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+```
+
+The `--env-file .env.production` flag on the `docker compose` command is
+required and is a different mechanism from `web`'s `env_file:` line inside
+`docker-compose.prod.yml` — see the comment at the top of that file, and
+DEPLOYMENT.md, for why both are needed. See DEPLOYMENT.md for the full
+runbook: first-boot admin seeding, backups, restart behaviour, rollback.
+
+Docker (single container, no Compose — example):
 
 ```bash
 docker build -t zenoscribe .
@@ -199,24 +249,41 @@ fine; `docker rm`/replacing the container is not). `zenoscribe-recordings`
 is a named Docker volume: Docker creates and persists it on the host the
 first time it's used, and every future `docker run` with the same volume
 name reattaches to the same data, so recordings survive redeploys as long
-as this stays a single container on this host.
+as this stays a single container on this host. You are also on your own for
+TLS termination in this path — the Compose path above gets it from Caddy.
 
-This assumes a single-container deployment. It does not extend to running
-multiple instances of the app at once (e.g. behind a load balancer for
-scale) — each instance would have its own local volume, so a recording
-saved by one instance wouldn't be visible from another. That needs
-S3-compatible object storage instead, which isn't implemented yet (see
+Either way, this assumes a single-container deployment. It does not extend
+to running multiple instances of the app at once (e.g. behind a load
+balancer for scale) — each instance would have its own local volume, so a
+recording saved by one instance wouldn't be visible from another, and each
+instance's own random `SERVER_BOOT_ID` would randomly log out users routed
+to a different instance. That needs S3-compatible object storage and a
+shared `SERVER_BOOT_ID` at minimum, neither implemented yet (see
 `E2E_Review.md`).
+
+The image runs as a non-root user (`USER app` in the Dockerfile) with
+`--workers 1` pinned explicitly — see the Dockerfile's comments for why
+raising worker count is unsafe without further changes.
 
 Note: `docker-compose.yml` in this repo is for local development only (it
 bind-mounts backend source for live-edit and defaults to `.env`) — don't use
-it as-is for production.
+it for production; use `docker-compose.prod.yml` instead.
+
+Health check: `GET /healthz` reports liveness plus a Postgres readiness
+check (`{"status": "ok", "database": "ok"}`, or a 503 with `"degraded"` if
+the database is unreachable). It's unauthenticated by design — deliberately
+returns nothing beyond ok/degraded, no version or config — and is wired
+into `docker-compose.prod.yml`'s `web` healthcheck already; point external
+uptime monitoring at it too (over HTTPS, once Caddy is up).
 
 CI / E2E tests
 
 - The repository includes a GitHub Actions workflow (`.github/workflows/ci.yml`)
-  with three jobs: the fast pytest suite, the Playwright integration suite (all
-  `test_e2e_playwright_*.py` files), and the frontend Vitest suite.
+  with five jobs: the fast pytest suite, the Playwright integration suite (all
+  `test_e2e_playwright_*.py` files), the frontend Vitest suite, a production
+  Docker image build (plus a sanity check for non-root and no leaked `.env`
+  file), and a dependency audit (`pip-audit` on `requirements.txt`, `npm
+  audit` on the frontend).
 - No test-hook env vars need to be set at the job level: the `live_server`
   fixture that actually launches the test server always sets its own
   `ALLOW_TEST_HOOKS`/hook secret on the subprocess's environment directly.
@@ -284,6 +351,14 @@ RUN_REAL_SONIOX_TESTS=true pytest -q -m real_network
 docker-compose up --build
 # Visit http://localhost:8000
 ```
+
+The image runs as a non-root user (Dockerfile's `USER app`). On Docker
+Desktop (Windows/macOS) this bind-mounts fine. On a Linux dev host, if the
+bind-mounted `voice_transcriber/` ends up owned by a UID the container's
+`app` user can't write to, recording saves will fail with a permission
+error — `docker compose run --user root web chown -R app:app
+/app/voice_transcriber` once is the fix, or match your host UID to the
+container's via a build arg if this comes up often.
 
 These quickchecks are intended for development and CI; do not enable debug
 logging or test hooks in production. See the Production section above for
@@ -569,7 +644,20 @@ python scripts/reconcile_recordings.py --delete   # also delete orphan files
   a development `.env`. The secret is then regenerated on every startup, so
   restarting the dev server invalidates all tokens and sends every open page
   back to login. This flag is ignored in production, where the fixed
-  `JWT_SECRET` is always used so deploys/restarts don't log real users out.
+  `JWT_SECRET` is always used — but that alone does *not* mean deploys/restarts
+  leave real users logged in. A separate mechanism does log everyone out on
+  every restart by default: see `SERVER_BOOT_ID` below.
+- **`SERVER_BOOT_ID` — restarts log every user out unless you set this.**
+  Independently of `JWT_SECRET`, every issued token is stamped with the boot
+  ID of the server process that issued it (`auth.py`), and a token whose
+  `boot` doesn't match the *currently running* process is rejected. Left
+  unset, a fresh random boot ID is generated on every process start — so a
+  plain `docker compose restart`, a crash loop, or a host reboot logs out
+  every user even though `JWT_SECRET` never changed. Set `SERVER_BOOT_ID` to
+  a fixed value in `.env.production` (see `.env.production.example`) if you
+  want sessions to survive ordinary restarts within the same deployment.
+  There is no way to revoke a single session early either way — see
+  DEPLOYMENT.md's limitations section.
 
 ## Batch (non-live) transcription
 

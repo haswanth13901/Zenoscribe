@@ -1,11 +1,14 @@
 # =============================================================================
-# Python packages — installed INSIDE the project's venv via:
-#   pip install -r requirements.txt
-# (see scripts/bootstrap.sh / scripts/bootstrap.ps1)
+# Python packages required to RUN the app in production.
 #
-# Anything NOT listed here (Node/npm packages, Playwright's browser binaries,
-# OS-level libs) is installed OUTSIDE this venv — see the "Non-pip / outside
-# the venv" section at the bottom of this file.
+#   pip install -r requirements.txt
+#
+# This is what the Dockerfile's production image installs - keep it limited
+# to runtime dependencies only. Anything only needed for local development,
+# testing, or linting belongs in requirements-dev.txt instead (which layers
+# on top of this file via `-r requirements.txt`), not here - every package
+# added here ships in the production image and widens its vulnerability
+# surface.
 # =============================================================================
 
 # Web framework & server
@@ -23,53 +26,6 @@ alembic==1.17.1
 bcrypt==5.0.0
 PyJWT==2.13.0
 
-# Config & HTTP
+# Config & HTTP (requests is used at runtime by soniox_client.py)
 python-dotenv==1.2.2
 requests==2.34.2
-
-# Local mic capture (record.py / CLI only; not needed for the web app,
-# since the browser captures audio in that path)
-sounddevice==0.5.5
-numpy==2.5.1
-scipy==1.18.0
-
-# Testing & E2E
-pytest==9.1.1
-pytest-asyncio==1.4.0
-pytest-playwright==0.8.0
-playwright==1.62.0
-
-# Required by starlette.testclient.TestClient (used in conftest.py's
-# `client` fixture) - not a runtime dependency of the app itself.
-httpx==0.28.1
-
-# Optional dev tools
-flake8>=7.0.0
-black>=26.0.0
-
-# =============================================================================
-# Non-pip / outside the venv
-# These are NOT installable via this file — pip can't manage them. Listed
-# here only so the full dependency picture lives in one place.
-#
-#   Node.js + npm (frontend/)
-#     Powers the React/RTK /home frontend. Not a Python package at all.
-#       npm --prefix frontend install
-#       npm --prefix frontend run build   # or `run dev` for local dev
-#
-#   Playwright browser binaries
-#     The `playwright` pip package above only installs the Python driver;
-#     the actual browser executables are a separate download, per-machine:
-#       python -m playwright install --with-deps
-#
-#   System libraries (Dockerfile installs these via apt-get; on bare metal
-#   install the OS equivalent yourself)
-#     build-essential, libssl-dev  - build toolchain for compiled deps
-#     libsndfile1                 - required by `scipy`/`sounddevice` for
-#                                    audio file I/O on Linux
-#     portaudio                   - required by `sounddevice` for live mic
-#                                    capture (e.g. `apt-get install
-#                                    portaudio19-dev`); usually unnecessary
-#                                    since the web app captures audio in the
-#                                    browser, not via sounddevice
-# =============================================================================

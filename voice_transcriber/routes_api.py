@@ -6,6 +6,8 @@ auth.user_from_ws() to identify the speaker at connection time.
 """
 
 import asyncio
+import concurrent.futures
+import functools
 import logging
 import mimetypes
 import os
@@ -37,6 +39,25 @@ except ImportError:  # run flat from inside the package dir
 log = logging.getLogger("api")
 
 router = APIRouter()
+
+# sx.transcribe_file blocks a thread for up to the Soniox transcription
+# timeout (minutes, for a long file). asyncio.to_thread would run it on the
+# loop's shared default executor - the same pool that serves
+# db.touch_seen (every authenticated request) and writeframes (every audio
+# chunk of every live session, in transcribe.py/translate.py). A handful of
+# simultaneous uploads could exhaust that pool and stall live transcription
+# with nothing in the logs to explain it. Give uploads their own small,
+# separately bounded pool instead.
+_UPLOAD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=3, thread_name_prefix="upload-transcribe",
+)
+
+
+async def _transcribe_file_bounded(*args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _UPLOAD_EXECUTOR, functools.partial(sx.transcribe_file, *args, **kwargs)
+    )
 
 
 class LoginBody(BaseModel):
@@ -467,7 +488,7 @@ async def transcribe_upload(
                 tmp.write(chunk)
 
         try:
-            turns = await asyncio.to_thread(sx.transcribe_file, path, num_speakers=num_speakers)
+            turns = await _transcribe_file_bounded(path, num_speakers=num_speakers)
         except TimeoutError as e:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")
         except RuntimeError as e:
@@ -531,8 +552,8 @@ async def transcribe_and_translate(
                 tmp.write(chunk)
 
         try:
-            turns = await asyncio.to_thread(
-                sx.transcribe_file, path, target_language=target_language, num_speakers=num_speakers
+            turns = await _transcribe_file_bounded(
+                path, target_language=target_language, num_speakers=num_speakers
             )
         except TimeoutError as e:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Transcription timed out: {e}")

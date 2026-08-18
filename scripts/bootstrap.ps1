@@ -11,10 +11,10 @@ $env:PATH = "$env:VIRTUAL_ENV\Scripts;" + $env:PATH
 
 Write-Host "[bootstrap] Upgrading pip and installing requirements"
 python -m pip install --upgrade pip
-if (Test-Path requirements.txt) {
-    python -m pip install -r requirements.txt
+if (Test-Path requirements-dev.txt) {
+    python -m pip install -r requirements-dev.txt
 } else {
-    Write-Warning "requirements.txt not found. Install dependencies manually."
+    Write-Warning "requirements-dev.txt not found. Install dependencies manually."
 }
 
 try {

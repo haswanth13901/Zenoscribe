@@ -1,0 +1,50 @@
+# Production reverse proxy for Zenoscribe.
+#
+# Replace the placeholder domain below with your real one, then:
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+# Caddy fetches and renews a Let's Encrypt cert automatically for any
+# non-"localhost" site address - no separate certbot step.
+
+your-domain.example.com {
+	# `web` is the Compose service name for the FastAPI app - resolved via
+	# Docker's internal DNS on the Compose network. It is never published
+	# to the host (see docker-compose.prod.yml's `expose:`), so this is
+	# the only path a request can reach it by.
+	reverse_proxy web:8000
+
+	# Live sessions (recording, translation) hold a WebSocket open for the
+	# length of a meeting. Caddy's default idle timeout would silently cut
+	# a long recording mid-sentence - that looks exactly like an app bug
+	# from the browser side, so it isn't left at the default here.
+	@ws path /ws /ws/translate
+	handle @ws {
+		reverse_proxy web:8000 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+
+	# Slightly above config.MAX_UPLOAD_MB (20MB) so the app's own limit is
+	# always what actually rejects an oversized upload - a 413 from the app
+	# includes a clear message; a request Caddy itself refuses does not.
+	request_body {
+		max_size 25MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# FastAPI has zero add_middleware() calls for security headers - this
+		# proxy is the only place any of these are set. frame-ancestors
+		# 'none' is the modern replacement for X-Frame-Options above (kept
+		# both for older browser coverage); connect-src 'self' covers this
+		# same-origin app's own /ws and /ws/translate WebSocket connections.
+		Content-Security-Policy "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+	}
+
+	encode gzip
+}

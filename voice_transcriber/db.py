@@ -54,6 +54,12 @@ def init():
     command.upgrade(cfg, "head")
 
 
+def ping():
+    """Readiness check - raises if Postgres is unreachable."""
+    with _get_pool().connection() as conn:
+        conn.execute("SELECT 1")
+
+
 def _now():
     return datetime.now(timezone.utc)
 

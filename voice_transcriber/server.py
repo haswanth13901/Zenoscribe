@@ -11,9 +11,10 @@ config.py, so the transcription engine can be reworked without touching
 login behaviour, and vice versa.
 """
 
+import asyncio
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -151,6 +152,21 @@ async def service_worker():
         media_type="text/javascript",
         headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
     )
+
+
+@app.get("/healthz")
+async def healthz(response: Response):
+    """Liveness + readiness probe for Caddy/Compose/monitoring.
+    Unauthenticated by design, but reports nothing beyond ok/degraded - no
+    version, no config - so it's safe to leave open on the public path.
+    """
+    try:
+        await asyncio.to_thread(db.ping)
+    except Exception:
+        log.exception("healthz: database readiness check failed")
+        response.status_code = 503
+        return {"status": "degraded", "database": "unreachable"}
+    return {"status": "ok", "database": "ok"}
 
 
 @app.get("/api/languages")

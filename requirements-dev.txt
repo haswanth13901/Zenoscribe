@@ -1,0 +1,62 @@
+# =============================================================================
+# Python packages for LOCAL DEVELOPMENT and TESTING, on top of the
+# production set:
+#
+#   pip install -r requirements-dev.txt
+#
+# (see scripts/bootstrap.sh / scripts/bootstrap.ps1, and CI's
+# .github/workflows/ci.yml, which both install this file rather than
+# requirements.txt directly.)
+#
+# NOT installed in the production Docker image - see requirements.txt and
+# the Dockerfile for why that split exists.
+# =============================================================================
+-r requirements.txt
+
+# Local mic capture (record.py / CLI only; not needed for the web app,
+# since the browser captures audio in that path)
+sounddevice==0.5.5
+numpy==2.5.1
+scipy==1.18.0
+
+# Testing & E2E
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-playwright==0.8.0
+playwright==1.62.0
+
+# Required by starlette.testclient.TestClient (used in conftest.py's
+# `client` fixture) - not a runtime dependency of the app itself.
+httpx==0.28.1
+
+# Dev tools
+flake8>=7.0.0
+black>=26.0.0
+
+# =============================================================================
+# Non-pip / outside the venv
+# These are NOT installable via this file — pip can't manage them. Listed
+# here only so the full dependency picture lives in one place.
+#
+#   Node.js + npm (frontend/)
+#     Powers the React/RTK /home frontend. Not a Python package at all.
+#       npm --prefix frontend install
+#       npm --prefix frontend run build   # or `run dev` for local dev
+#
+#   Playwright browser binaries
+#     The `playwright` pip package above only installs the Python driver;
+#     the actual browser executables are a separate download, per-machine:
+#       python -m playwright install --with-deps
+#
+#   System libraries (dev/CI installs these via apt-get; on bare metal
+#   install the OS equivalent yourself. The production Dockerfile installs
+#   its own, smaller set - see the Dockerfile.)
+#     build-essential, libssl-dev  - build toolchain for compiled deps
+#     libsndfile1                 - required by `scipy`/`sounddevice` for
+#                                    audio file I/O on Linux
+#     portaudio                   - required by `sounddevice` for live mic
+#                                    capture (e.g. `apt-get install
+#                                    portaudio19-dev`); usually unnecessary
+#                                    since the web app captures audio in the
+#                                    browser, not via sounddevice
+# =============================================================================

@@ -8,7 +8,10 @@ on:
       - 'alembic/**'
       - 'alembic.ini'
       - 'requirements.txt'
+      - 'requirements-dev.txt'
       - 'pytest.ini'
+      - 'Dockerfile'
+      - 'docker-compose.prod.yml'
       - '.github/workflows/ci.yml'
   pull_request:
     paths:
@@ -17,7 +20,10 @@ on:
       - 'alembic/**'
       - 'alembic.ini'
       - 'requirements.txt'
+      - 'requirements-dev.txt'
       - 'pytest.ini'
+      - 'Dockerfile'
+      - 'docker-compose.prod.yml'
       - '.github/workflows/ci.yml'
 
 jobs:
@@ -54,7 +60,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -109,9 +115,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # playwright and pytest-playwright are already pinned in
-          # requirements.txt; this just makes that explicit/resilient to it
-          # moving out of there later.
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # requirements-dev.txt; this just makes that explicit/resilient to
+          # it moving out of there later.
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install pytest-playwright requests
 
       - name: Install Playwright browsers
@@ -158,3 +164,68 @@ jobs:
       - name: Run Vitest suite
         run: npm --prefix frontend test
         timeout-minutes: 10
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Builds the exact image the deploy team runs (docker-compose.prod.yml
+      # `build: .` uses this same Dockerfile). A broken Dockerfile - a stale
+      # COPY path, a frontend build failure, a dependency that only
+      # resolves on the dev machine - previously reached the deploy team as
+      # a surprise on their first deploy attempt instead of failing here.
+      - name: Build production image
+        run: docker build -t zenoscribe:ci .
+
+      # Confirms non-root (Dockerfile's USER app) and that no real .env file
+      # leaked into the image despite `COPY . /app` - .dockerignore should
+      # have excluded it, this is what actually proves that. Excludes
+      # .env.example/.env.production.example, which .dockerignore
+      # deliberately re-includes and are meant to ship.
+      - name: Sanity-check the built image
+        run: |
+          docker run --rm zenoscribe:ci whoami | grep -qx app
+          leaked=$(docker run --rm zenoscribe:ci sh -c \
+            "ls -a /app | grep -E '^\.env' | grep -vE '^\.env\.(production\.)?example\$'" || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::unexpected .env file(s) found inside the built image: $leaked"
+            exit 1
+          fi
+
+  dependency-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      # Audits only the production dependency set (requirements.txt) - the
+      # set that actually ships in the image - not requirements-dev.txt's
+      # test/lint tooling, which is never deployed.
+      - name: Audit Python production dependencies (pip-audit)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Audit frontend dependencies (npm audit)
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend audit --audit-level=high
