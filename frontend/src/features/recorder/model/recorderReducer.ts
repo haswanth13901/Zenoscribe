@@ -6,6 +6,8 @@ export const initialRecorderState: RecorderState = {
   isError: false,
   turns: [],
   partial: null,
+  backgrounded: false,
+  reconnecting: false,
 };
 
 const ACTIVE_STATUSES = new Set(["connecting", "authenticating", "listening"]);
@@ -30,6 +32,12 @@ export function recorderReducer(state: RecorderState, event: RecorderEvent): Rec
       };
 
     case "ws-open":
+      // Guarded on "connecting" (not just ACTIVE_STATUSES) because this
+      // also fires when a reconnect attempt's socket opens, and status
+      // stays "listening" throughout a reconnect (see reconnect-scheduled)
+      // - without the guard, a reconnect's ws-open would incorrectly knock
+      // status back down to "authenticating" mid-session.
+      if (state.status !== "connecting") return state;
       return { ...state, status: "authenticating", statusMessage: "authenticating" };
 
     case "ws-ready":
@@ -49,6 +57,7 @@ export function recorderReducer(state: RecorderState, event: RecorderEvent): Rec
         statusMessage: `audio setup failed: ${event.message}`,
         isError: true,
         partial: null,
+        reconnecting: false,
       };
 
     case "final":
@@ -70,6 +79,7 @@ export function recorderReducer(state: RecorderState, event: RecorderEvent): Rec
         statusMessage: `error: ${event.message}`,
         isError: true,
         partial: null,
+        reconnecting: false,
       };
 
     case "ws-close":
@@ -78,13 +88,16 @@ export function recorderReducer(state: RecorderState, event: RecorderEvent): Rec
       // close if `running` was already true, so a close during
       // "connecting"/"authenticating" (before the WS ever reached
       // "listening") left the toggle permanently disabled. Any active
-      // status now recovers to "stopped".
+      // status now recovers to "stopped". Reached today only after
+      // reconnect attempts are exhausted (see reconnect-scheduled) - a
+      // single drop retries first instead of landing here immediately.
       return {
         ...state,
         status: "stopped",
         statusMessage: "stopped",
         isError: false,
         partial: null,
+        reconnecting: false,
       };
 
     case "ws-error":
@@ -94,6 +107,7 @@ export function recorderReducer(state: RecorderState, event: RecorderEvent): Rec
         statusMessage: "connection failed",
         isError: true,
         partial: null,
+        reconnecting: false,
       };
 
     case "manual-stop":
@@ -104,12 +118,44 @@ export function recorderReducer(state: RecorderState, event: RecorderEvent): Rec
         statusMessage: "stopped",
         isError: false,
         partial: null,
+        reconnecting: false,
       };
 
     case "clear":
       // Independent of status, matching the original #clear handler (it
       // doesn't check `running`).
       return { ...state, turns: [], partial: null };
+
+    case "tab-hidden":
+      // Only worth warning about while a session is actually live - a
+      // backgrounded idle/stopped page has nothing to lose.
+      if (state.status !== "listening" || state.backgrounded) return state;
+      return { ...state, backgrounded: true };
+
+    case "tab-visible":
+      if (!state.backgrounded) return state;
+      return { ...state, backgrounded: false };
+
+    case "reconnect-scheduled":
+      // status is deliberately left as-is (still "listening"/"connecting"/
+      // "authenticating") - the mic/AudioWorklet are still alive underneath,
+      // only the socket dropped, so Stop must stay available throughout.
+      if (!ACTIVE_STATUSES.has(state.status)) return state;
+      return {
+        ...state,
+        reconnecting: true,
+        statusMessage: `reconnecting (attempt ${event.attempt})…`,
+        isError: false,
+      };
+
+    case "reconnected":
+      return {
+        ...state,
+        status: "listening",
+        statusMessage: "listening",
+        isError: false,
+        reconnecting: false,
+      };
 
     default:
       return state;

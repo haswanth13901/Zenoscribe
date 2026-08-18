@@ -18,8 +18,10 @@ frontend/dist/
 
 # Application data / secrets
 .env
+.env.*
 *.env
 !.env.example
+!.env.production.example
 app.db
 *.sqlite
 *.sqlite3

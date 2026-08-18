@@ -132,6 +132,72 @@ describe("recorderReducer", () => {
     expect(noop).toBe(initialRecorderState);
   });
 
+  it("ws-open only advances status from connecting - a reconnect's ws-open (status already listening) is a no-op", () => {
+    const listeningInput: RecorderState = { ...initialRecorderState, status: "listening" };
+    const state = recorderReducer(listeningInput, { type: "ws-open" });
+    expect(state).toBe(listeningInput);
+  });
+
+  it("reconnect-scheduled sets reconnecting + a status message but leaves status untouched, only while active", () => {
+    const state = recorderReducer(
+      { ...initialRecorderState, status: "listening" },
+      { type: "reconnect-scheduled", attempt: 2 },
+    );
+    expect(state.status).toBe("listening");
+    expect(state.reconnecting).toBe(true);
+    expect(state.statusMessage).toContain("attempt 2");
+
+    const stoppedInput: RecorderState = { ...initialRecorderState, status: "stopped" };
+    const noop = recorderReducer(stoppedInput, { type: "reconnect-scheduled", attempt: 1 });
+    expect(noop).toBe(stoppedInput);
+  });
+
+  it("reconnected returns to listening and clears reconnecting", () => {
+    const state = recorderReducer(
+      { ...initialRecorderState, status: "listening", reconnecting: true, statusMessage: "reconnecting (attempt 3)…" },
+      { type: "reconnected" },
+    );
+    expect(state.status).toBe("listening");
+    expect(state.statusMessage).toBe("listening");
+    expect(state.reconnecting).toBe(false);
+  });
+
+  it("giving up (ws-close) after reconnect attempts also clears reconnecting", () => {
+    const state = recorderReducer(
+      { ...initialRecorderState, status: "listening", reconnecting: true },
+      { type: "ws-close" },
+    );
+    expect(state.status).toBe("stopped");
+    expect(state.reconnecting).toBe(false);
+  });
+
+  it("tab-hidden sets backgrounded only while listening", () => {
+    const whileListening = recorderReducer(
+      { ...initialRecorderState, status: "listening" },
+      { type: "tab-hidden" },
+    );
+    expect(whileListening.backgrounded).toBe(true);
+
+    const stoppedInput: RecorderState = { ...initialRecorderState, status: "stopped" };
+    const whileStopped = recorderReducer(stoppedInput, { type: "tab-hidden" });
+    expect(whileStopped.backgrounded).toBe(false);
+    expect(whileStopped).toBe(stoppedInput); // true no-op, same reference
+  });
+
+  it("tab-visible clears backgrounded regardless of status", () => {
+    const state = recorderReducer(
+      { ...initialRecorderState, status: "listening", backgrounded: true },
+      { type: "tab-visible" },
+    );
+    expect(state.backgrounded).toBe(false);
+  });
+
+  it("tab-hidden/tab-visible are no-ops (same reference) when nothing changes", () => {
+    const idle = initialRecorderState;
+    expect(recorderReducer(idle, { type: "tab-hidden" })).toBe(idle);
+    expect(recorderReducer(idle, { type: "tab-visible" })).toBe(idle);
+  });
+
   it("clear empties turns/partial independent of status", () => {
     const withData: RecorderState = {
       ...initialRecorderState,

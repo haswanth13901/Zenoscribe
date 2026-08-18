@@ -25,6 +25,16 @@ export interface TranslateState {
    * it is finalized. Index-based keys are safe for rendering since entries
    * are only ever appended or wiped (clear), never reordered. */
   utterances: Utterance[];
+  /** True while actively listening and the tab is backgrounded/screen
+   * locked - mobile browsers may suspend JS/audio in this state, so the UI
+   * warns the session could silently stop. Cleared as soon as the tab is
+   * visible again, regardless of status. */
+  backgrounded: boolean;
+  /** True while the WS dropped unexpectedly (not a manual stop/restart, not
+   * an auth failure, not an idle-watchdog timeout) and
+   * useTranslateConnection is retrying with backoff. The mic stream and
+   * AudioWorklet stay alive underneath - only the socket is recreated. */
+  reconnecting: boolean;
 }
 
 export type TranslateMode = "one_way" | "two_way";
@@ -89,4 +99,8 @@ export type TranslateEvent =
   | { type: "manual-stop" }
   | { type: "restart-started" }
   | { type: "restart-cleared" }
-  | { type: "clear" };
+  | { type: "clear" }
+  | { type: "tab-hidden" }
+  | { type: "tab-visible" }
+  | { type: "reconnect-scheduled"; attempt: number }
+  | { type: "reconnected" };

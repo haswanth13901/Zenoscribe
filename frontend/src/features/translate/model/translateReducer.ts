@@ -5,6 +5,8 @@ export const initialTranslateState: TranslateState = {
   statusMessage: "idle",
   isError: false,
   utterances: [],
+  backgrounded: false,
+  reconnecting: false,
 };
 
 const ACTIVE_STATUSES = new Set(["connecting", "listening"]);
@@ -58,6 +60,7 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
         status: "stopped",
         statusMessage: `audio setup failed: ${event.message}`,
         isError: true,
+        reconnecting: false,
       };
 
     case "captions": {
@@ -115,6 +118,7 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
         status: "stopped",
         statusMessage: `error: ${event.message}`,
         isError: true,
+        reconnecting: false,
       };
 
     case "timeout":
@@ -123,6 +127,7 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
         status: "stopped",
         statusMessage: event.message || "Session ended after inactivity.",
         isError: false,
+        reconnecting: false,
       };
 
     case "ws-close":
@@ -130,15 +135,23 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
       // Deliberate improvement over the original (same fix already applied
       // to the recorder): it only called stop() if `running` was already
       // true, so a close during "connecting" left the toggle stuck. Any
-      // active status now recovers to "stopped".
-      return { ...state, status: "stopped", statusMessage: "stopped", isError: false };
+      // active status now recovers to "stopped". Reached today only after
+      // reconnect attempts are exhausted (see reconnect-scheduled) - a
+      // single drop retries first instead of landing here immediately.
+      return { ...state, status: "stopped", statusMessage: "stopped", isError: false, reconnecting: false };
 
     case "ws-error":
-      return { ...state, status: "stopped", statusMessage: "connection failed", isError: true };
+      return {
+        ...state,
+        status: "stopped",
+        statusMessage: "connection failed",
+        isError: true,
+        reconnecting: false,
+      };
 
     case "manual-stop":
       if (!ACTIVE_STATUSES.has(state.status)) return state;
-      return { ...state, status: "stopped", statusMessage: "stopped", isError: false };
+      return { ...state, status: "stopped", statusMessage: "stopped", isError: false, reconnecting: false };
 
     case "restart-started":
       return { ...state, statusMessage: "restarting", isError: false };
@@ -150,6 +163,37 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
       // Independent of status, matching the original clearTranscript() not
       // checking `running`.
       return { ...state, utterances: [] };
+
+    case "tab-hidden":
+      // Only worth warning about while a session is actually live - a
+      // backgrounded idle/stopped page has nothing to lose.
+      if (state.status !== "listening" || state.backgrounded) return state;
+      return { ...state, backgrounded: true };
+
+    case "tab-visible":
+      if (!state.backgrounded) return state;
+      return { ...state, backgrounded: false };
+
+    case "reconnect-scheduled":
+      // status is deliberately left as-is ("listening" or "connecting") -
+      // the mic/AudioWorklet are still alive underneath, only the socket
+      // dropped, so Stop must stay available throughout.
+      if (!ACTIVE_STATUSES.has(state.status)) return state;
+      return {
+        ...state,
+        reconnecting: true,
+        statusMessage: `reconnecting (attempt ${event.attempt})…`,
+        isError: false,
+      };
+
+    case "reconnected":
+      return {
+        ...state,
+        status: "listening",
+        statusMessage: "listening",
+        isError: false,
+        reconnecting: false,
+      };
 
     default:
       return state;

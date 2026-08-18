@@ -9,6 +9,12 @@
   margin: 0 auto;
 }
 
+@media (min-width: 1600px) {
+  .wrap {
+    max-width: 1280px;
+  }
+}
+
 .greet {
   margin: 4px 0 26px;
 }

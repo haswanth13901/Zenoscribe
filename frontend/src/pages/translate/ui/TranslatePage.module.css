@@ -28,6 +28,10 @@
   color: var(--err);
 }
 
+.statusWarn {
+  color: var(--warn);
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.3;
@@ -181,4 +185,24 @@
   flex: 1;
   overflow-y: auto;
   padding: 22px;
+}
+
+.backgroundWarning {
+  margin: 0 20px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font-size: 13px;
+  flex: none;
+}
+
+.unsupportedWarning {
+  margin: 0 20px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--err);
+  border-radius: 6px;
+  color: var(--err);
+  font-size: 13px;
+  flex: none;
 }

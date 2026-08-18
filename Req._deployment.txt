@@ -1,0 +1,64 @@
+Zenoscribe — Deployment Requirements / To-Do
+==============================================
+(For the deploy team. Source: E2E_Review.md in the repo.)
+
+1. Secret rotation (manual — must be done before first production deploy)
+---------------------------------------------------------------------------
+The code already refuses to start in production if these are missing/weak,
+but it cannot generate or supply real values for you — that part is manual:
+
+  [ ] Generate a fresh JWT_SECRET (do not reuse the developer's local .env
+      value). Command:
+          python -c "import secrets; print(secrets.token_urlsafe(48))"
+      Keep it stable across deploys once set — rotating it later logs every
+      user out.
+
+  [ ] Issue a new SONIOX_API_KEY from https://console.soniox.com — do not
+      reuse the developer's local/dev key.
+
+  [ ] Set a strong ADMIN_PASSWORD (min 8 characters, do not reuse the dev
+      value).
+
+  [ ] Confirm ALLOW_TEST_HOOKS=false (the app refuses to boot in production
+      if this is true — safeguard already in code, just don't override it).
+
+  [ ] Put all of the above into .env.production (copy from
+      .env.production.example) or your platform's secret manager. Never
+      commit real values to git — .env.production is already git-ignored.
+
+  [ ] Set ENV=production as a real process/platform environment variable
+      (not inside .env.production itself — the app needs it before it knows
+      which file to load).
+
+2. Recordings storage (Docker volume — required for a single-container deploy)
+---------------------------------------------------------------------------
+Without this, recording audio/transcripts live only in the container's
+writable layer and are lost the moment the container is removed or
+redeployed (a plain restart is fine; replacing the container is not).
+
+  [ ] Mount a named Docker volume onto the recordings directory:
+          docker run -p 8000:8000 -e ENV=production --env-file .env.production \
+            -v zenoscribe-recordings:/app/voice_transcriber/recordings \
+            zenoscribe
+      Docker creates/persists zenoscribe-recordings on the host the first
+      time it's used; every future `docker run` with the same volume name
+      reattaches to the same data.
+
+  [ ] If you plan to run more than one container instance at once
+      (load-balanced replicas, etc.) instead of a single container: STOP —
+      a local volume isn't shared across instances, so recordings saved by
+      one instance are invisible to another. That needs S3-compatible
+      object storage instead (not yet implemented — flag this back to the
+      dev team before scaling out).
+
+3. HTTPS/TLS (required — not optional)
+---------------------------------------------------------------------------
+Entirely on the deploy team to set up; the app does not terminate TLS
+itself.
+
+  [ ] Put a reverse proxy or the platform's own TLS termination in front of
+      the app (e.g. nginx/Caddy with a cert, or your platform's built-in
+      HTTPS). Browsers only allow microphone capture (getUserMedia) over a
+      secure context, so recording/translation will not work at all over
+      plain HTTP on a real domain (localhost is exempt, for local testing
+      only).

@@ -23,7 +23,11 @@ services:
     # Only backend source is bind-mounted for live-edit convenience - the
     # image's baked frontend/dist (built by the Dockerfile's frontend-build
     # stage) is deliberately left alone so it isn't shadowed by a missing or
-    # stale host-side build.
+    # stale host-side build. As a side effect, this already makes
+    # recordings/ (written under voice_transcriber/) persist on the host
+    # across `docker compose up`/`down` here in dev - production deploys
+    # don't get this mount and need their own volume, see the README's
+    # "Production" > Docker section.
     volumes:
       - ./voice_transcriber:/app/voice_transcriber
       - ./alembic:/app/alembic

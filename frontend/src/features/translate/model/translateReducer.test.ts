@@ -310,6 +310,66 @@ describe("translateReducer", () => {
     expect(cleared.statusMessage).toBe("cleared");
   });
 
+  it("reconnect-scheduled sets reconnecting + a status message but leaves status untouched, only while active", () => {
+    const state = translateReducer(
+      { ...initialTranslateState, status: "listening" },
+      { type: "reconnect-scheduled", attempt: 2 },
+    );
+    expect(state.status).toBe("listening");
+    expect(state.reconnecting).toBe(true);
+    expect(state.statusMessage).toContain("attempt 2");
+
+    const stoppedInput: TranslateState = { ...initialTranslateState, status: "stopped" };
+    const noop = translateReducer(stoppedInput, { type: "reconnect-scheduled", attempt: 1 });
+    expect(noop).toBe(stoppedInput);
+  });
+
+  it("reconnected returns to listening and clears reconnecting", () => {
+    const state = translateReducer(
+      { ...initialTranslateState, status: "listening", reconnecting: true },
+      { type: "reconnected" },
+    );
+    expect(state.status).toBe("listening");
+    expect(state.statusMessage).toBe("listening");
+    expect(state.reconnecting).toBe(false);
+  });
+
+  it("giving up (ws-close) after reconnect attempts also clears reconnecting", () => {
+    const state = translateReducer(
+      { ...initialTranslateState, status: "listening", reconnecting: true },
+      { type: "ws-close" },
+    );
+    expect(state.status).toBe("stopped");
+    expect(state.reconnecting).toBe(false);
+  });
+
+  it("tab-hidden sets backgrounded only while listening", () => {
+    const whileListening = translateReducer(
+      { ...initialTranslateState, status: "listening" },
+      { type: "tab-hidden" },
+    );
+    expect(whileListening.backgrounded).toBe(true);
+
+    const stoppedInput: TranslateState = { ...initialTranslateState, status: "stopped" };
+    const whileStopped = translateReducer(stoppedInput, { type: "tab-hidden" });
+    expect(whileStopped.backgrounded).toBe(false);
+    expect(whileStopped).toBe(stoppedInput); // true no-op, same reference
+  });
+
+  it("tab-visible clears backgrounded regardless of status", () => {
+    const state = translateReducer(
+      { ...initialTranslateState, status: "listening", backgrounded: true },
+      { type: "tab-visible" },
+    );
+    expect(state.backgrounded).toBe(false);
+  });
+
+  it("tab-hidden/tab-visible are no-ops (same reference) when nothing changes", () => {
+    const idle = initialTranslateState;
+    expect(translateReducer(idle, { type: "tab-hidden" })).toBe(idle);
+    expect(translateReducer(idle, { type: "tab-visible" })).toBe(idle);
+  });
+
   it("clear empties utterances independent of status", () => {
     const withData: TranslateState = {
       ...initialTranslateState,

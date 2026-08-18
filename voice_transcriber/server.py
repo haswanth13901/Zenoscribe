@@ -132,6 +132,21 @@ async def upload_page():
     return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
+@app.get("/service-worker.js")
+async def service_worker():
+    # Served from "/" rather than under the /static mount below: a service
+    # worker's default scope is capped at the directory it's served from,
+    # so serving it from /static/ would only ever let it control /static/
+    # requests. Service-Worker-Allowed widens that to the whole app - the
+    # file itself still lands in frontend/dist/ via Vite's public-dir copy,
+    # same mechanism as login.html/theme.css, just read from a second route.
+    return FileResponse(
+        f"{config.FRONTEND_DIST_DIR}/service-worker.js",
+        media_type="text/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/api/languages")
 async def language_list():
     return {

@@ -1,9 +1,12 @@
 # --- Secrets & config ---
-# Never commit real keys. .env holds the Soniox key, JWT secret, and admin
-# credentials. Commit .env.example instead.
+# Never commit real keys. .env / .env.<ENV> (e.g. .env.production) hold the
+# Soniox key, JWT secret, and admin credentials. Commit the .example files
+# instead.
 .env
+.env.*
 *.env
 !.env.example
+!.env.production.example
 
 # --- Application data ---
 # SQLite database (users, recording metadata, presence).

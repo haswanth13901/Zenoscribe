@@ -20,6 +20,16 @@ export interface RecorderState {
   isError: boolean;
   turns: Turn[];
   partial: PartialTurn | null;
+  /** True while actively listening and the tab is backgrounded/screen
+   * locked - mobile browsers may suspend JS/audio in this state, so the UI
+   * warns the recording could silently stop. Cleared as soon as the tab is
+   * visible again, regardless of status. */
+  backgrounded: boolean;
+  /** True while the WS dropped unexpectedly (not a manual stop, not an
+   * auth failure) and useRecorderConnection is retrying with backoff. The
+   * mic stream and AudioWorklet stay alive underneath - only the socket is
+   * being recreated. */
+  reconnecting: boolean;
 }
 
 // The /ws server's message shapes (transcribe.py) - trusted, not runtime
@@ -43,4 +53,8 @@ export type RecorderEvent =
   | { type: "ws-close" }
   | { type: "ws-error" }
   | { type: "manual-stop" }
-  | { type: "clear" };
+  | { type: "clear" }
+  | { type: "tab-hidden" }
+  | { type: "tab-visible" }
+  | { type: "reconnect-scheduled"; attempt: number }
+  | { type: "reconnected" };

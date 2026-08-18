@@ -96,10 +96,14 @@ def client(isolated_db, isolated_recordings, monkeypatch):
     startup fires, so the admin auth.ensure_seed_admin() creates is
     deterministic and independent of whatever the developer's real .env
     contains - tests that need an admin still create their own via
-    make_user() rather than relying on this seeded one.
+    make_user() rather than relying on this seeded one. ALLOW_TEST_HOOKS is
+    likewise forced off here so hook-gating tests don't depend on whatever
+    the developer's real .env happens to set; tests that need hooks enabled
+    monkeypatch it back to True themselves (see test_internal_test_hook.py).
     """
     monkeypatch.setenv("ADMIN_USERNAME", "seed-admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "Seed-Admin-Password-123")
+    monkeypatch.setattr(config, "ALLOW_TEST_HOOKS", False)
     with TestClient(app) as c:
         yield c
 

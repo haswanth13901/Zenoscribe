@@ -5,6 +5,7 @@ import { useGetLanguagesQuery } from "@/entities/language/api/languagesApi";
 import { useElapsedTimer } from "@/features/translate/model/useElapsedTimer";
 import { useTranslateConnection } from "@/features/translate/model/useTranslateConnection";
 import type { TranslateMode, TranslateSettings } from "@/features/translate/model/types";
+import { checkAudioCaptureSupport } from "@/shared/lib/browserSupport";
 import { TranscriptView, type ViewMode } from "@/pages/translate/ui/TranscriptView";
 import styles from "./TranslatePage.module.css";
 
@@ -24,6 +25,9 @@ export function TranslatePage(): ReactElement {
   const user = useAppSelector((s) => s.auth.user)!;
   const { state, start, stop, restart } = useTranslateConnection();
   const elapsed = useElapsedTimer(state.status === "listening");
+  // Checked once per mount rather than waiting for a Start click to hit a
+  // cryptic native error - browser capabilities don't change mid-session.
+  const support = useMemo(() => checkAudioCaptureSupport(), []);
 
   const { data: languagesData } = useGetLanguagesQuery();
   const languages = useMemo(() => languagesData?.languages ?? [], [languagesData]);
@@ -100,7 +104,7 @@ export function TranslatePage(): ReactElement {
       <div className={styles.toolbar}>
         <span
           data-testid="translate-status"
-          className={`${styles.status} ${state.status === "listening" ? styles.statusLive : ""} ${state.isError ? styles.statusError : ""}`}
+          className={`${styles.status} ${state.status === "listening" && !state.reconnecting ? styles.statusLive : ""} ${state.reconnecting ? styles.statusWarn : ""} ${state.isError ? styles.statusError : ""}`}
         >
           {state.status === "listening" && elapsed
             ? `${state.statusMessage} · ${elapsed}`
@@ -296,13 +300,35 @@ export function TranslatePage(): ReactElement {
             type="button"
             data-testid="translate-toggle"
             className={`${styles.toggleBtn} ${state.status === "listening" ? styles.rec : ""}`}
-            disabled={isBusy}
+            disabled={isBusy || !support.supported}
             onClick={handleToggle}
           >
             {state.status === "listening" ? "Stop" : "Start"}
           </button>
         </div>
       </div>
+
+      {!support.supported && (
+        <div
+          className={styles.unsupportedWarning}
+          data-testid="translate-unsupported-warning"
+          role="alert"
+        >
+          {support.reason}
+        </div>
+      )}
+
+      {state.backgrounded && (
+        <div
+          className={styles.backgroundWarning}
+          data-testid="translate-background-warning"
+          role="status"
+        >
+          This tab is in the background or your screen is locked — some
+          mobile browsers pause the session here. Keep this tab open and
+          visible to avoid losing audio.
+        </div>
+      )}
 
       <main className={styles.main}>
         <TranscriptView utterances={state.utterances} view={view} langName={langName} />

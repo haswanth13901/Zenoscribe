@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -16,7 +15,8 @@ except ImportError:  # run flat from inside the package dir
     import db
     import config
 
-load_dotenv()
+# config (imported above) already loaded the right dotenv file for ENV
+# before this module reads any env vars below.
 log = logging.getLogger("auth")
 MIN_PASSWORD_LENGTH = 8
 

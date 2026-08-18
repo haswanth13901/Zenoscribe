@@ -6,6 +6,17 @@
   gap: 18px;
 }
 
+/* Two independent reading columns benefit from real extra width on an
+   ultrawide/large monitor (unlike a single prose column, where going much
+   past ~900px just makes lines too long to track) - each column still ends
+   up under 700px wide even at the cap below, comfortably inside a readable
+   line length. */
+@media (min-width: 1600px) {
+  .cols {
+    max-width: 1400px;
+  }
+}
+
 .col h2 {
   font-size: 11px;
   text-transform: uppercase;
@@ -66,6 +77,12 @@
 .stack {
   max-width: 700px;
   margin: 0 auto;
+}
+
+@media (min-width: 1600px) {
+  .stack {
+    max-width: 900px;
+  }
 }
 
 @media (max-width: 720px) {

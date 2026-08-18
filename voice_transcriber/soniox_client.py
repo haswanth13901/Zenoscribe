@@ -3,6 +3,11 @@ import time
 import requests
 from dotenv import load_dotenv
 
+try:
+    from . import config
+except ImportError:  # run flat from inside the package dir
+    import config
+
 REST = os.environ.get("SONIOX_REST_URL", "https://api.soniox.com")
 WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
@@ -36,7 +41,11 @@ POLL_REQUEST_TIMEOUT = int(os.environ.get('SONIOX_POLL_REQUEST_TIMEOUT', '10'))
 TRANSCRIPTION_INIT_TIMEOUT = int(os.environ.get('SONIOX_TRANSCRIPTION_INIT_TIMEOUT', '10'))
 
 def get_api_key():
-    load_dotenv(override=True)
+    # Reload from the same dotenv file config.py resolved at import time (not
+    # a bare `.env`) - otherwise a stray dev `.env` sitting next to
+    # `.env.production` would silently override the production key on every
+    # call, since override=True is needed for dev hot-reload of a rotated key.
+    load_dotenv(config.ENV_FILE, override=True)
     return os.environ["SONIOX_API_KEY"]
 
 def get_headers():

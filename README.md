@@ -161,13 +161,56 @@ For production, enforce the following before starting the app:
 If required secrets are missing or weak in production the app will refuse to
 start to avoid insecure defaults.
 
+You can provide these either as real process env vars (system/CI/platform
+secrets UI), or via a `.env.production` file:
+
+```bash
+cp .env.production.example .env.production
+# edit .env.production and fill in real values
+```
+
+`voice_transcriber/config.py` loads `.env.<ENV>` (e.g. `.env.production`) if
+it exists, falling back to plain `.env` otherwise. `ENV` itself still has to
+be set as a real process env var — the app needs it before it knows which
+file to load. `.env.production` is git- and docker-ignored, same as `.env`;
+never commit it.
+
 Start (example):
 
 ```bash
-# ensure the environment variables are provided by your system/CI/deployment
-# from the repository root
-uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 --workers 1
+# ENV=production must be a real process env var; the rest can come from
+# .env.production (see above) or your system/CI/deployment secrets
+ENV=production uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 --workers 1
 ```
+
+Docker (example):
+
+```bash
+docker build -t zenoscribe .
+docker run -p 8000:8000 -e ENV=production --env-file .env.production \
+  -v zenoscribe-recordings:/app/voice_transcriber/recordings \
+  zenoscribe
+```
+
+The `-v zenoscribe-recordings:...` mount is required — without it, recording
+audio/transcripts live only inside the container's writable layer and are
+lost the moment the container is removed or redeployed (a plain restart is
+fine; `docker rm`/replacing the container is not). `zenoscribe-recordings`
+is a named Docker volume: Docker creates and persists it on the host the
+first time it's used, and every future `docker run` with the same volume
+name reattaches to the same data, so recordings survive redeploys as long
+as this stays a single container on this host.
+
+This assumes a single-container deployment. It does not extend to running
+multiple instances of the app at once (e.g. behind a load balancer for
+scale) — each instance would have its own local volume, so a recording
+saved by one instance wouldn't be visible from another. That needs
+S3-compatible object storage instead, which isn't implemented yet (see
+`E2E_Review.md`).
+
+Note: `docker-compose.yml` in this repo is for local development only (it
+bind-mounts backend source for live-edit and defaults to `.env`) — don't use
+it as-is for production.
 
 CI / E2E tests
 

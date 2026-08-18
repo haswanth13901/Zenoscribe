@@ -7,7 +7,23 @@ paths without importing each other.
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).parent
+REPO_ROOT = BASE_DIR.parent
+
+# Which dotenv file to load: .env.<ENV> if present (e.g. .env.production),
+# else the plain .env used for development/testing. ENV itself has to come
+# from a real process env var (docker-compose `environment:`, systemd,
+# platform secrets UI) - it can't live inside the file it's used to select.
+# This must run before anything below reads os.environ, and config.py must
+# be the first project module imported (it is - every other module imports
+# config before touching env vars), so this is the single place env files
+# get loaded from.
+_env_name = os.environ.get('ENV', 'development').lower()
+_env_specific_file = REPO_ROOT / f".env.{_env_name}"
+ENV_FILE = _env_specific_file if _env_specific_file.exists() else REPO_ROOT / ".env"
+load_dotenv(ENV_FILE)
 
 # Environment mode: 'development' (default), 'testing', or 'production'
 ENV = os.environ.get('ENV', 'development').lower()
@@ -74,3 +90,5 @@ ALLOW_TEST_HOOKS = os.environ.get('ALLOW_TEST_HOOKS', 'false').lower() in ('1','
 # Short shared secret required to call test hooks. Set in CI env when enabled.
 TEST_HOOK_SECRET = os.environ.get('TEST_HOOK_SECRET')
 RESTRICT_TEST_HOOK_TO_LOCALHOST = os.environ.get('RESTRICT_TEST_HOOK_TO_LOCALHOST', 'true').lower() in ('1','true','yes')
+if PRODUCTION and ALLOW_TEST_HOOKS:
+    raise RuntimeError("ALLOW_TEST_HOOKS must not be enabled in production")

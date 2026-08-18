@@ -1,9 +1,10 @@
-import { useState, type ReactElement } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { useAppSelector } from "@/app/hooks";
 import { AppLayout } from "@/widgets/app-layout/ui/AppLayout";
 import { useRecorderConnection } from "@/features/recorder/model/useRecorderConnection";
 import { triggerBlobDownload } from "@/shared/lib/download";
 import { turnsToText } from "@/features/recorder/lib/transcriptText";
+import { checkAudioCaptureSupport } from "@/shared/lib/browserSupport";
 import { TurnList } from "@/pages/recorder/ui/TurnList";
 import styles from "./RecorderPage.module.css";
 
@@ -12,6 +13,9 @@ export function RecorderPage(): ReactElement {
   const user = useAppSelector((s) => s.auth.user)!;
   const { state, start, stop, clear } = useRecorderConnection();
   const [numSpeakers, setNumSpeakers] = useState("");
+  // Checked once per mount rather than waiting for a Start click to hit a
+  // cryptic native error - browser capabilities don't change mid-session.
+  const support = useMemo(() => checkAudioCaptureSupport(), []);
 
   const isListening = state.status === "listening";
   const isBusy = state.status === "connecting" || state.status === "authenticating";
@@ -39,7 +43,7 @@ export function RecorderPage(): ReactElement {
       <div className={styles.toolbar}>
         <span
           data-testid="recorder-status"
-          className={`${styles.status} ${isListening ? styles.statusLive : ""} ${state.isError ? styles.statusError : ""}`}
+          className={`${styles.status} ${isListening && !state.reconnecting ? styles.statusLive : ""} ${state.reconnecting ? styles.statusWarn : ""} ${state.isError ? styles.statusError : ""}`}
         >
           {state.statusMessage === "idle" ? "" : state.statusMessage}
         </span>
@@ -61,7 +65,7 @@ export function RecorderPage(): ReactElement {
           type="button"
           data-testid="recorder-toggle"
           className={`${styles.toggleBtn} ${isListening ? styles.rec : ""}`}
-          disabled={isBusy}
+          disabled={isBusy || !support.supported}
           onClick={handleToggle}
         >
           {isListening ? "Stop" : "Start"}
@@ -78,6 +82,20 @@ export function RecorderPage(): ReactElement {
           Save
         </button>
       </div>
+
+      {!support.supported && (
+        <div className={styles.unsupportedWarning} data-testid="recorder-unsupported-warning" role="alert">
+          {support.reason}
+        </div>
+      )}
+
+      {state.backgrounded && (
+        <div className={styles.backgroundWarning} data-testid="recorder-background-warning" role="status">
+          This tab is in the background or your screen is locked — some
+          mobile browsers pause recording here. Keep this tab open and
+          visible to avoid losing audio.
+        </div>
+      )}
 
       <main className={styles.main}>
         <TurnList turns={state.turns} partial={state.partial} />
