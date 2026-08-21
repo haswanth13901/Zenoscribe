@@ -51,6 +51,13 @@ if PRODUCTION and not os.environ.get('SONIOX_API_KEY'):
 # static/ copy) - see the repo README's "Frontend" section.
 FRONTEND_DIST_DIR = str(BASE_DIR.parent / "frontend" / "dist")
 
+# Origin of the Vite dev server (see frontend/vite.config.ts), allowed
+# through CORS only outside production - see server.py. The Vite proxy
+# already keeps most browser requests same-origin, so this only matters for
+# calls made straight to this app's own dev port instead of through the
+# proxy (e.g. hitting :3000 directly while iterating).
+DEV_FRONTEND_ORIGIN = os.environ.get('DEV_FRONTEND_ORIGIN', 'http://localhost:8000')
+
 # Protect /api/login from brute-force attempts.
 LOGIN_ATTEMPT_WINDOW_SEC = 300
 LOGIN_ATTEMPT_LIMIT = 5

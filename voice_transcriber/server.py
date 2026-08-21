@@ -15,6 +15,7 @@ import asyncio
 import logging
 
 from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -45,6 +46,36 @@ app = FastAPI(title="Zenoscribe")
 # Specific expensive endpoints (uploads, WS connects) have their own
 # tighter per-user limits declared where they're defined.
 app.add_middleware(rate_limit.GlobalRateLimitMiddleware)
+
+
+class _DevOnlyCORSMiddleware:
+    """Forwards to Starlette's CORSMiddleware only when config.PRODUCTION is
+    False - read fresh on every request rather than captured once when this
+    middleware is constructed, the same way config.ALLOW_TEST_HOOKS is
+    re-checked per-request elsewhere in this repo (routes_api.py), so tests
+    can flip config.PRODUCTION via monkeypatch and see the change take
+    effect on the same app/TestClient instance. Production stays same-origin
+    behind Caddy with zero CORS surface either way."""
+
+    def __init__(self, app, **cors_kwargs):
+        self._app = app
+        self._cors_app = CORSMiddleware(app, **cors_kwargs)
+
+    async def __call__(self, scope, receive, send):
+        target = self._app if config.PRODUCTION else self._cors_app
+        await target(scope, receive, send)
+
+
+# Dev-only: lets the browser call this app directly at its dev port (e.g.
+# while iterating without going through the Vite proxy at :8000). Gated off
+# entirely in production - see _DevOnlyCORSMiddleware above.
+app.add_middleware(
+    _DevOnlyCORSMiddleware,
+    allow_origins=[config.DEV_FRONTEND_ORIGIN],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.on_event("startup")

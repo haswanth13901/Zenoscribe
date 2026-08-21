@@ -16,8 +16,12 @@ services:
 
   web:
     build: .
+    # Backend dev port is 3000 (paired with the Vite dev server at :8000,
+    # which proxies /api, /ws, /ws/translate and /healthz here - see
+    # frontend/vite.config.ts). Production stays on 8000 via
+    # docker-compose.prod.yml/Caddyfile, unaffected by this file.
     ports:
-      - "${PORT:-8000}:${PORT:-8000}"
+      - "${PORT:-3000}:${PORT:-3000}"
     env_file:
       - .env
     # Only backend source is bind-mounted for live-edit convenience - the
@@ -33,7 +37,7 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./scripts:/app/scripts
-    command: uvicorn voice_transcriber.server:app --host 0.0.0.0 --port ${PORT:-8000}
+    command: uvicorn voice_transcriber.server:app --host 0.0.0.0 --port ${PORT:-3000}
     restart: unless-stopped
     depends_on:
       db:

@@ -5,6 +5,7 @@
   "description": "Zenoscribe post-login React frontend (pilot: /home)",
   "type": "module",
   "scripts": {
+    "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
