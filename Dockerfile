@@ -59,6 +59,16 @@ FROM python:3.12-slim AS app-base
 # instead of skipping the packages that need them.
 RUN apt-get update && apt-get dist-upgrade -y && rm -rf /var/lib/apt/lists/*
 
+# The above only patches Debian (.deb) packages - it can't touch the base
+# image's own bundled *system* Python install at /usr/local (a completely
+# separate thing from our venv at /opt/venv, which already gets a fresh
+# pip via the python-deps stage above). With the OS layer clean, Trivy's
+# python-pkg scan surfaced two HIGH CVEs sitting in that bundled system
+# Python: setuptools 70.3.0 (CVE-2025-47273, path traversal) and pip's own
+# vendored msgpack copy (GHSA-6v7p-g79w-8964) - both fixed by upgrading
+# pip/setuptools here, before PATH below points at the venv instead.
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools
+
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
