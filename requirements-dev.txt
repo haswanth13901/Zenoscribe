@@ -22,7 +22,7 @@ scipy==1.18.0
 # Testing & E2E
 pytest==9.1.1
 pytest-asyncio==1.4.0
-pytest-playwright==0.8.0
+pytest-playwright==0.9.0
 playwright==1.62.0
 
 # Required by starlette.testclient.TestClient (used in conftest.py's
