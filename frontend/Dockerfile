@@ -17,6 +17,13 @@ RUN npm run build
 # ---- Stage 2: serve it ----
 FROM nginx:1.27-alpine
 
+# nginx:1.27-alpine's own baked-in Alpine packages lag its security repo -
+# CI's Trivy scan (docker-build job) found dozens of already-patched
+# CRITICAL/HIGH CVEs (libssl3/libcrypto3 among them) sitting in the base
+# image untouched. Pull the latest security patches for whatever's already
+# installed rather than adding new packages.
+RUN apk update && apk upgrade --no-cache
+
 # nginx's own default.conf (a generic try_files SPA config) doesn't match
 # this app's actual routing - see nginx.conf's own comments for why a
 # blanket SPA fallback isn't used here.

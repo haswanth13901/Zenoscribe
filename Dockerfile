@@ -46,6 +46,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # ---- Stage: common base for both backend targets below ----
 FROM python:3.12-slim AS app-base
 
+# python:3.12-slim's own baked-in OS packages lag Debian's security repo -
+# CI's Trivy scan (docker-build job) failed on CVEs in util-linux/bsdutils
+# (already-patched HIGH-severity issues) that were sitting in the base
+# image untouched, not in anything requirements.txt pulls in. Pull the
+# latest security patches for whatever's already installed rather than
+# adding new packages.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
