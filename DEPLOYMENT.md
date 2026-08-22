@@ -274,3 +274,68 @@ stays evergreen. Status of that audit's findings as of this doc's last edit:
       `npm --prefix frontend test`.
 - [ ] **Tag the release** you deploy — reference that tag in tickets/incident
       reports, not "whatever was on main."
+
+---
+
+## 7. Open decision — replacing Caddy with nginx (not yet decided)
+
+Raised as a question, not started. Recorded here so the options aren't
+re-derived from scratch later. Nothing in the stack currently reflects
+this — `caddy` is still the edge in `docker-compose.prod.yml`.
+
+**What `caddy` actually does today** (`Caddyfile`): TLS termination with
+automatic Let's Encrypt issuance/renewal (zero config — just the domain
+name), path-based routing (`/api/*`, `/healthz`, `/ws`, `/ws/translate` →
+`web`; everything else → `frontend`), disabled timeouts on the two
+WebSocket paths, security headers (HSTS/CSP/X-Frame-Options/etc.), a
+25MB request body cap, and gzip.
+
+nginx can do the routing/headers/WS/gzip/body-cap parts — that's a
+config rewrite, not a capability gap. The actual gap is TLS: nginx has no
+built-in ACME client, so automatic certificate issuance/renewal (what
+Caddy gives for free) needs to come from somewhere else.
+
+**Two independent choices:**
+
+1. **Container topology:**
+   - **Merge into the existing `frontend` nginx** — one container does
+     TLS + routing + static-file serving. Drops the stack from 4
+     containers to 3 (`db`, `web`, `nginx`).
+   - **Keep two containers** — leave `frontend` exactly as-is (plain
+     HTTP internally, static files only); add a new nginx container in
+     `caddy`'s place doing TLS + routing, proxying to `web:8000` or
+     `frontend:80` by path. Same 4-container shape as now, smaller diff.
+
+2. **Where the TLS certificate comes from:**
+   - **Certbot sidecar** — a `certbot` container sharing a volume with
+     nginx, running the ACME challenge and a renewal loop, with a
+     deploy-hook to reload nginx on renewal. Self-contained, no external
+     dependency, but now a component this team owns end-to-end — a
+     silently broken renewal loop or reload hook means the cert expires
+     with no warning.
+   - **`nginx-proxy` + `acme-companion`** — a known pre-built two-container
+     combo that auto-generates nginx config and handles Let's Encrypt
+     automatically. Closest to Caddy's "just works," but it's someone
+     else's automation layered on top of nginx rather than a config this
+     team fully controls.
+   - **Offload TLS upstream of the VM** (Cloudflare, a cloud load
+     balancer with a managed cert) — nginx then only ever speaks plain
+     HTTP internally, no ACME logic anywhere in this stack. The only
+     option that's a genuine net reduction in moving parts, but only if
+     that upstream layer already exists or is worth adding for other
+     reasons.
+   - **Manually provisioned certificate** — works, but is no longer
+     "automatic": renewal (~every 90 days for Let's Encrypt) becomes a
+     recurring manual task with nothing to remind anyone.
+
+**What the nginx rewrite itself has to get right** — things Caddy does
+implicitly that nginx needs spelled out, each a place to introduce a
+silent bug: the WebSocket upgrade headers (`Upgrade`/`Connection` -
+missing this breaks every live recording/translate session, not loudly),
+the HTTP→HTTPS redirect block, TLS protocol/cipher hardening (Caddy
+defaults to modern-safe; nginx defaults to whatever the base image
+ships), and the "no timeout on `/ws`" behavior via
+`proxy_read_timeout`/`proxy_send_timeout`.
+
+No recommendation recorded here on purpose — pending a decision on both
+axes above before any implementation starts.
