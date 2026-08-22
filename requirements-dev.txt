@@ -16,7 +16,7 @@
 # Local mic capture (record.py / CLI only; not needed for the web app,
 # since the browser captures audio in that path)
 sounddevice==0.5.5
-numpy==2.5.1
+numpy==2.5.2
 scipy==1.18.0
 
 # Testing & E2E
