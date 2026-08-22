@@ -49,10 +49,15 @@ FROM python:3.12-slim AS app-base
 # python:3.12-slim's own baked-in OS packages lag Debian's security repo -
 # CI's Trivy scan (docker-build job) failed on CVEs in util-linux/bsdutils
 # (already-patched HIGH-severity issues) that were sitting in the base
-# image untouched, not in anything requirements.txt pulls in. Pull the
-# latest security patches for whatever's already installed rather than
-# adding new packages.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+# image untouched, not in anything requirements.txt pulls in.
+#
+# dist-upgrade, not plain upgrade: apt-get upgrade refuses to touch any
+# package whose fix requires installing/removing a dependency, which is
+# exactly the case for low-level packages like util-linux/bsdutils - a
+# first attempt at this fix used plain `upgrade` and the CVEs were still
+# there in CI afterward. dist-upgrade resolves those dependency changes
+# instead of skipping the packages that need them.
+RUN apt-get update && apt-get dist-upgrade -y && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
