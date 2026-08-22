@@ -84,22 +84,25 @@ class ActiveBody(BaseModel):
 @router.post("/api/login")
 async def login(body: LoginBody, request: Request):
     client_ip = request.client.host if request.client else ""
-    if db.count_recent_failed_logins(body.username, client_ip, config.LOGIN_ATTEMPT_WINDOW_SEC) >= config.LOGIN_ATTEMPT_LIMIT:
+    recent_failures = await asyncio.to_thread(
+        db.count_recent_failed_logins, body.username, client_ip, config.LOGIN_ATTEMPT_WINDOW_SEC
+    )
+    if recent_failures >= config.LOGIN_ATTEMPT_LIMIT:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "Too many login attempts, try again later",
         )
 
-    row = db.get_user_by_username(body.username)
+    row = await asyncio.to_thread(db.get_user_by_username, body.username)
     # Same message either way so the response can't be used to discover
     # which usernames exist.
-    if not row or not auth.verify_password(body.password, row["password_hash"]):
-        db.record_failed_login(body.username, client_ip)
+    if not row or not await asyncio.to_thread(auth.verify_password, body.password, row["password_hash"]):
+        await asyncio.to_thread(db.record_failed_login, body.username, client_ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     if not row["is_active"]:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is deactivated")
-    db.clear_failed_logins(body.username, client_ip)
-    db.touch_login(row["id"])
+    await asyncio.to_thread(db.clear_failed_logins, body.username, client_ip)
+    await asyncio.to_thread(db.touch_login, row["id"])
     return {
         "token": auth.make_token(row),
         "user": {
@@ -137,7 +140,7 @@ async def admin_list_users(_=Depends(auth.current_admin)):
             "last_seen": r["last_seen"],
             "recording_count": r["recording_count"],
         }
-        for r in db.list_users()
+        for r in await asyncio.to_thread(db.list_users)
     ]
 
 
@@ -154,11 +157,13 @@ async def admin_create_user(
         )
     if body.role not in ("user", "admin"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role")
-    if db.get_user_by_username(body.username):
+    if await asyncio.to_thread(db.get_user_by_username, body.username):
         raise HTTPException(status.HTTP_409_CONFLICT, "Username already taken")
-    uid = db.create_user(
+    password_hash = await asyncio.to_thread(auth.hash_password, body.password)
+    uid = await asyncio.to_thread(
+        db.create_user,
         username=body.username,
-        password_hash=auth.hash_password(body.password),
+        password_hash=password_hash,
         full_name=body.full_name,
         email=body.email,
         role=body.role,
@@ -179,9 +184,10 @@ async def admin_reset_password(
             status.HTTP_400_BAD_REQUEST,
             f"Password must be at least {auth.MIN_PASSWORD_LENGTH} characters",
         )
-    if not db.get_user(user_id):
+    if not await asyncio.to_thread(db.get_user, user_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-    db.set_password(user_id, auth.hash_password(body.password))
+    password_hash = await asyncio.to_thread(auth.hash_password, body.password)
+    await asyncio.to_thread(db.set_password, user_id, password_hash)
     return {"ok": True}
 
 
@@ -192,7 +198,7 @@ async def admin_set_active(
     admin=Depends(auth.current_admin),
     _rl=Depends(rate_limit.per_user(60, 60, "admin-write")),
 ):
-    target = db.get_user(user_id)
+    target = await asyncio.to_thread(db.get_user, user_id)
     if not target:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     # Guard against an admin locking themselves - and possibly everyone -
@@ -202,17 +208,17 @@ async def admin_set_active(
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "Cannot deactivate yourself"
             )
-        if target["role"] == "admin" and db.count_admins() <= 1:
+        if target["role"] == "admin" and await asyncio.to_thread(db.count_admins) <= 1:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "Cannot deactivate the last admin"
             )
-        updated = db.set_active(user_id, body.is_active)
+        updated = await asyncio.to_thread(db.set_active, user_id, body.is_active)
         if not updated:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "Cannot deactivate the last admin"
             )
     else:
-        db.set_active(user_id, body.is_active)
+        await asyncio.to_thread(db.set_active, user_id, body.is_active)
     return {"ok": True}
 
 
@@ -222,16 +228,16 @@ async def admin_delete_user(
     admin=Depends(auth.current_admin),
     _rl=Depends(rate_limit.per_user(60, 60, "admin-write")),
 ):
-    target = db.get_user(user_id)
+    target = await asyncio.to_thread(db.get_user, user_id)
     if not target:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     if str(target["id"]) == str(admin["id"]):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot delete yourself")
-    if target["role"] == "admin" and db.count_admins() <= 1:
+    if target["role"] == "admin" and await asyncio.to_thread(db.count_admins) <= 1:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Cannot delete the last admin"
         )
-    files = db.delete_user(user_id)
+    files = await asyncio.to_thread(db.delete_user, user_id)
     if files is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Cannot delete the last admin"
@@ -312,7 +318,8 @@ async def list_recordings(
         )
     scope = user_id if user["role"] == "admin" else user["id"]
     try:
-        rows = db.list_recordings(
+        rows = await asyncio.to_thread(
+            db.list_recordings,
             user_id=scope, date_from=date_from, date_to=date_to, source=source
         )
     except ValueError:
@@ -322,8 +329,8 @@ async def list_recordings(
     return [_rec_json(r) for r in rows]
 
 
-def _authorize_recording(rec_id, user):
-    row = db.get_recording(rec_id)
+async def _authorize_recording(rec_id, user):
+    row = await asyncio.to_thread(db.get_recording, rec_id)
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Recording not found")
     if user["role"] != "admin" and row["user_id"] != user["id"]:
@@ -338,7 +345,7 @@ async def get_transcript(
     user=Depends(auth.current_user),
     _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
 ):
-    row = _authorize_recording(rec_id, user)
+    row = await _authorize_recording(rec_id, user)
     path = config.RECORDINGS / row["txt_file"]
     if not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Transcript missing")
@@ -351,7 +358,7 @@ async def get_audio(
     user=Depends(auth.current_user),
     _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
 ):
-    row = _authorize_recording(rec_id, user)
+    row = await _authorize_recording(rec_id, user)
     path = config.RECORDINGS / row["wav_file"]
     if not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Audio missing")
@@ -370,8 +377,8 @@ async def remove_recording(
     user=Depends(auth.current_user),
     _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
 ):
-    _authorize_recording(rec_id, user)
-    files = db.delete_recording(rec_id)
+    await _authorize_recording(rec_id, user)
+    files = await asyncio.to_thread(db.delete_recording, rec_id)
     if files:
         for name in files:
             try:

@@ -212,6 +212,7 @@ app.include_router(routes_api.router)
 app.include_router(transcribe.router)
 app.include_router(translate.router)
 
+
 class NoCacheStaticFiles(StaticFiles):
     """Forces revalidation on every request so browsers can't keep serving
     a stale cached JS/CSS file after an update (ETag-based conditional

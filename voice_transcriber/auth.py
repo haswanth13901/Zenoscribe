@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import secrets
@@ -123,7 +124,7 @@ async def current_user(
             detail="Unauthorized",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    row = user_from_token(creds.credentials)
+    row = await asyncio.to_thread(user_from_token, creds.credentials)
     if not row:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
@@ -131,7 +132,7 @@ async def current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     # Every authenticated request refreshes presence. Cheap single-row update.
-    db.touch_seen(row["id"])
+    await asyncio.to_thread(db.touch_seen, row["id"])
     return row
 
 
@@ -149,15 +150,19 @@ async def user_from_ws(websocket: WebSocket) -> tuple:
     embedding the JWT in the URL. Returns (user, payload) so callers can read
     other fields (e.g. num_speakers) carried on the same frame; payload is
     always a dict, even on failure.
+
+    Bounded by a timeout so a client that connects and never sends a frame
+    doesn't hold the socket + suspended task open indefinitely.
     """
     try:
-        payload = await websocket.receive_json()
+        payload = await asyncio.wait_for(websocket.receive_json(), timeout=10)
     except Exception:
         return None, {}
     if not isinstance(payload, dict):
         return None, {}
     token = payload.get("token")
-    return (user_from_token(token) if token else None), payload
+    user = await asyncio.to_thread(user_from_token, token) if token else None
+    return user, payload
 
 
 def ensure_seed_admin():

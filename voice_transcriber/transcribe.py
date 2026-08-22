@@ -272,7 +272,10 @@ async def live(client: WebSocket):
                                 # new speaker, so move them out of the old turn.
                                 async with lock:
                                     carried_tokens = state["pending_tokens"]
-                                    state["buf_tokens"] = state["buf_tokens"][: -len(carried_tokens)] if carried_tokens else state["buf_tokens"]
+                                    state["buf_tokens"] = (
+                                        state["buf_tokens"][: -len(carried_tokens)]
+                                        if carried_tokens else state["buf_tokens"]
+                                    )
                                     await _flush_locked()
                                     state["speaker"] = label
                                     state["votes"] = {label: streak}

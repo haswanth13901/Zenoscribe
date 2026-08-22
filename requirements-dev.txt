@@ -29,9 +29,13 @@ playwright==1.62.0
 # `client` fixture) - not a runtime dependency of the app itself.
 httpx==0.28.1
 
-# Dev tools
-flake8>=7.0.0
-black>=26.0.0
+# Dev tools. flake8 is also CI's backend-lint gate (blocking) - pinned exact,
+# like everything else in this file, so a new major release can't silently
+# change which rules fire and break the gate on an unrelated push.
+# Dependabot (.github/dependabot.yml) opens the bump PR when a new version
+# ships; that PR is what should move this pin, not an ad-hoc edit.
+flake8==7.3.0
+black==26.5.1
 
 # =============================================================================
 # Non-pip / outside the venv

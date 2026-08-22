@@ -129,7 +129,7 @@ def test_transcribe_endpoint_persists_recording(client, make_user, make_wav, mon
     headers = _login(client, "plain_upload_user", "PlainUploadPass123!")
 
     r = client.post("/api/transcribe", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 200
 
     r = client.get("/api/recordings", headers=headers)
@@ -148,7 +148,7 @@ def test_transcribe_translate_endpoint_persists_recording(client, make_user, mak
     headers = _login(client, "translate_upload_user", "TranslateUploadPass123!")
 
     r = client.post("/api/transcribe/translate?target_language=en", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 200
 
     r = client.get("/api/recordings", headers=headers)

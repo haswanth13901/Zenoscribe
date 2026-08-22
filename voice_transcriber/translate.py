@@ -55,13 +55,18 @@ async def translate(client: WebSocket):
 
     # First frame authenticates (matches the transcription engine's pattern:
     # the JWT never rides in the URL). It also carries the session settings.
+    # Bounded so an unauthenticated client that never sends a frame doesn't
+    # hold the socket + task open indefinitely.
     try:
-        hello = await client.receive_json()
+        hello = await asyncio.wait_for(client.receive_json(), timeout=10)
     except Exception:
         await client.close(code=4400)
         return
 
-    ws_user = auth.user_from_token(hello.get("token", "")) if isinstance(hello, dict) else None
+    ws_user = (
+        await asyncio.to_thread(auth.user_from_token, hello.get("token", ""))
+        if isinstance(hello, dict) else None
+    )
     if not ws_user:
         await client.close(code=4401)
         return
@@ -91,7 +96,9 @@ async def translate(client: WebSocket):
             "one_way", target_language=target, diarize=diarize, num_speakers=num_speakers
         )
         # In one-way, everything is spoken in the single target language.
-        tts_lang_for = lambda tok_lang: target
+
+        def tts_lang_for(tok_lang):
+            return target
         # Any spoken word already in the target language (e.g. an English word
         # dropped into Spanish, target=English) has nothing to translate, so
         # Soniox emits it as source-only. We still want it in the translation
@@ -109,7 +116,9 @@ async def translate(client: WebSocket):
         )
         # In two-way, a translated token's own language field tells us which
         # voice language to speak it in.
-        tts_lang_for = lambda tok_lang: tok_lang or lang_b
+
+        def tts_lang_for(tok_lang):
+            return tok_lang or lang_b
         # Both sides are targets; a word already in either is passed through.
         target_langs = {lang_a, lang_b}
     else:
@@ -445,7 +454,7 @@ async def translate(client: WebSocket):
 
         if not turns:
             log.info("discarding empty translate session %s for %s",
-                      session, ws_user["username"])
+                     session, ws_user["username"])
             try:
                 await asyncio.to_thread(wav_path.unlink)
             except Exception:
@@ -520,7 +529,7 @@ async def _save_translate_session(session, ws_user, wav_path, started_at, turns)
         log.exception("could not register translate recording %s", session)
     else:
         log.info("saved translate session %s for %s (%d turns)",
-                  session, ws_user["username"], len(turns))
+                 session, ws_user["username"], len(turns))
 
 
 async def _fail(client, message):

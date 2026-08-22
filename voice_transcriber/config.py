@@ -96,13 +96,15 @@ DEBUG_SONIOX = False
 DEBUG_SPEAKERS = False
 # When true, translate.py will log token text in debug messages. Default
 # is False; do not enable in production.
-DEBUG_TOKENS = os.environ.get('DEBUG_TOKENS', 'false').lower() in ('1','true','yes')
+DEBUG_TOKENS = os.environ.get('DEBUG_TOKENS', 'false').lower() in ('1', 'true', 'yes')
 
 # Allow tests to enable runtime-only admin endpoints that flip fake upstream
 # behavior. This must be explicitly enabled in CI/dev; default is disabled.
-ALLOW_TEST_HOOKS = os.environ.get('ALLOW_TEST_HOOKS', 'false').lower() in ('1','true','yes')
+ALLOW_TEST_HOOKS = os.environ.get('ALLOW_TEST_HOOKS', 'false').lower() in ('1', 'true', 'yes')
 # Short shared secret required to call test hooks. Set in CI env when enabled.
 TEST_HOOK_SECRET = os.environ.get('TEST_HOOK_SECRET')
-RESTRICT_TEST_HOOK_TO_LOCALHOST = os.environ.get('RESTRICT_TEST_HOOK_TO_LOCALHOST', 'true').lower() in ('1','true','yes')
+RESTRICT_TEST_HOOK_TO_LOCALHOST = os.environ.get(
+    'RESTRICT_TEST_HOOK_TO_LOCALHOST', 'true'
+).lower() in ('1', 'true', 'yes')
 if PRODUCTION and ALLOW_TEST_HOOKS:
     raise RuntimeError("ALLOW_TEST_HOOKS must not be enabled in production")

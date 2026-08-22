@@ -28,7 +28,7 @@ def test_transcribe_timeout_maps_to_504(client, make_user, make_wav, monkeypatch
     make_user("timeout_user", "TimeoutPass123!")
     headers = _login(client, "timeout_user", "TimeoutPass123!")
     r = client.post("/api/transcribe", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 504
 
 
@@ -37,7 +37,7 @@ def test_transcribe_runtime_error_maps_to_502(client, make_user, make_wav, monke
     make_user("runtime_user", "RuntimePass123!")
     headers = _login(client, "runtime_user", "RuntimePass123!")
     r = client.post("/api/transcribe", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 502
 
 
@@ -62,6 +62,6 @@ def test_oversize_upload_rejected_with_413_and_temp_file_cleaned_up(
     # ~2KB of WAV data, comfortably over the 1KB limit.
     big_wav = make_wav(num_frames=1100)
     r = client.post("/api/transcribe", headers=headers,
-                     files={"file": ("big.wav", big_wav, "audio/wav")})
+                    files={"file": ("big.wav", big_wav, "audio/wav")})
     assert r.status_code == 413
     assert list(staging_dir.iterdir()) == []

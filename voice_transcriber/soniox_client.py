@@ -34,11 +34,12 @@ def clamp_num_speakers(num_speakers):
         return None
     return n
 
-# Network timeouts (in seconds)
-# Allow overriding from environment for testing/CI (e.g. use a small value to fail fast)
+
+# Overridable from environment for testing/CI (e.g. a small value to fail fast).
 UPLOAD_TIMEOUT = int(os.environ.get('SONIOX_UPLOAD_TIMEOUT', '30'))
 POLL_REQUEST_TIMEOUT = int(os.environ.get('SONIOX_POLL_REQUEST_TIMEOUT', '10'))
 TRANSCRIPTION_INIT_TIMEOUT = int(os.environ.get('SONIOX_TRANSCRIPTION_INIT_TIMEOUT', '10'))
+
 
 def get_api_key():
     # Reload from the same dotenv file config.py resolved at import time (not
@@ -48,8 +49,10 @@ def get_api_key():
     load_dotenv(config.ENV_FILE, override=True)
     return os.environ["SONIOX_API_KEY"]
 
+
 def get_headers():
     return {"Authorization": "Bearer " + get_api_key()}
+
 
 def delete_remote_file(file_id):
     try:
@@ -58,9 +61,12 @@ def delete_remote_file(file_id):
     except requests.RequestException:
         pass
 
+
 def delete_transcription(job_id):
     try:
-        resp = requests.delete(f"{REST}/v1/transcriptions/{job_id}", headers=get_headers(), timeout=POLL_REQUEST_TIMEOUT)
+        resp = requests.delete(
+            f"{REST}/v1/transcriptions/{job_id}", headers=get_headers(), timeout=POLL_REQUEST_TIMEOUT
+        )
         resp.raise_for_status()
     except requests.RequestException:
         try:
@@ -71,11 +77,13 @@ def delete_transcription(job_id):
         except requests.RequestException:
             pass
 
+
 def cleanup_remote_resources(file_id=None, job_id=None):
     if job_id is not None:
         delete_transcription(job_id)
     if file_id is not None:
         delete_remote_file(file_id)
+
 
 class SpeakerLabeler:
     """Maps Soniox speaker IDs to stable user-1, user-2... in first-heard order."""
@@ -183,6 +191,7 @@ def tts_config(voice, language, stream_id, sample_rate=TTS_SAMPLE_RATE):
 # Test-only fake mode (None unless set by tests). Use set_test_fake_mode()/get_test_fake_mode().
 _TEST_FAKE_MODE = None
 
+
 def set_test_fake_mode(mode: str):
     """Set test fake mode. Accepted values: 'timeout','runtime','ok', or None to clear."""
     global _TEST_FAKE_MODE
@@ -193,7 +202,10 @@ def get_test_fake_mode():
     return _TEST_FAKE_MODE
 
 
-def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, language_hints=("en",), target_language=None, num_speakers=None):
+def transcribe_file(
+    path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, language_hints=("en",),
+    target_language=None, num_speakers=None,
+):
     """Upload a file, wait for the job, return merged speaker turns.
 
     If target_language is provided, request a one-way translation from Soniox
@@ -247,7 +259,9 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
         body["translation"] = {"type": "one_way", "target_language": target_language}
 
     try:
-        resp = requests.post(f"{REST}/v1/transcriptions", headers=get_headers(), json=body, timeout=TRANSCRIPTION_INIT_TIMEOUT)
+        resp = requests.post(
+            f"{REST}/v1/transcriptions", headers=get_headers(), json=body, timeout=TRANSCRIPTION_INIT_TIMEOUT
+        )
         resp.raise_for_status()
         job_id = resp.json()["id"]
     except requests.Timeout:
@@ -302,6 +316,7 @@ def transcribe_file(path, poll_interval=2.0, timeout=BATCH_POLL_TIMEOUT, languag
         return merge_tokens(tokens)
     finally:
         cleanup_remote_resources(file_id=file_id, job_id=job_id)
+
 
 def merge_tokens(tokens):
     """Collapse token stream into consecutive same-speaker turns."""

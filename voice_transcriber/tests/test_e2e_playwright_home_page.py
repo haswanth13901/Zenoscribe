@@ -38,7 +38,7 @@ def test_home_page_authenticated_render_and_nav(live_server):
 
         page.goto(live_server.base_url + "/home")
 
-        page.wait_for_selector(f"text=Good ", timeout=10000)
+        page.wait_for_selector("text=Good ", timeout=10000)
         assert r_user["username"] in page.content()
         page.wait_for_selector("text=Recent sessions", timeout=10000)
 

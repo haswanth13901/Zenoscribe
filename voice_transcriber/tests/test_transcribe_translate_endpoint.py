@@ -35,7 +35,7 @@ def test_translate_returns_translated_turns(client, make_user, make_wav, monkeyp
     make_user("translate_user", "TranslatePass123!")
     headers = _login(client, "translate_user", "TranslatePass123!")
     r = client.post("/api/transcribe/translate?target_language=es", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 200
     turns = r.json()["turns"]
     assert len(turns) == 1
@@ -47,7 +47,7 @@ def test_transcribe_without_target_language_returns_english(client, make_user, m
     make_user("plain_user", "PlainPass123!")
     headers = _login(client, "plain_user", "PlainPass123!")
     r = client.post("/api/transcribe/translate", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 200
     assert r.json()["turns"][0]["text"] == "Hello world"
 
@@ -57,7 +57,7 @@ def test_transcribe_with_target_language_returns_translated_text(client, make_us
     make_user("fr_user", "FrPass123!")
     headers = _login(client, "fr_user", "FrPass123!")
     r = client.post("/api/transcribe/translate?target_language=fr", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 200
     assert r.json()["turns"][0]["text"] == "Bonjour le monde"
 
@@ -67,7 +67,7 @@ def test_translate_timeout_maps_to_504(client, make_user, make_wav, monkeypatch)
     make_user("translate_timeout_user", "TranslateTimeoutPass123!")
     headers = _login(client, "translate_timeout_user", "TranslateTimeoutPass123!")
     r = client.post("/api/transcribe/translate", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 504
 
 
@@ -76,5 +76,5 @@ def test_translate_runtime_error_maps_to_502(client, make_user, make_wav, monkey
     make_user("translate_runtime_user", "TranslateRuntimePass123!")
     headers = _login(client, "translate_runtime_user", "TranslateRuntimePass123!")
     r = client.post("/api/transcribe/translate", headers=headers,
-                     files={"file": ("test.wav", make_wav(), "audio/wav")})
+                    files={"file": ("test.wav", make_wav(), "audio/wav")})
     assert r.status_code == 502
