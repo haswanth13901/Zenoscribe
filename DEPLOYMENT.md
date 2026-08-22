@@ -5,6 +5,15 @@ in front for TLS. Replaces `Req._deployment.txt`, which predated the
 Compose + Caddy setup — this is the one current doc, don't split back into
 two.
 
+**Four containers, three separately-built/pulled images** (`docker-compose.prod.yml`):
+
+| Service | Image | Role |
+|---|---|---|
+| `db` | stock `postgres:16-alpine`, no custom Dockerfile | Postgres |
+| `web` | built from the repo root `Dockerfile` (its default `backend` target) | API/WS only - `/api/*`, `/ws`, `/ws/translate`, `/healthz`. No page-serving. |
+| `frontend` | built from `frontend/Dockerfile` (nginx) | The SPA shell, login page, and static assets |
+| `caddy` | `caddy:2-alpine` | TLS termination; routes `/api/*`/`/healthz`/`/ws*` to `web`, everything else to `frontend` - see `Caddyfile` |
+
 See also: `README.md`'s "Production" section (how to run it),
 `E2E_Review.md` (open architectural items), `docker-compose.prod.yml` and
 `Caddyfile` (the actual configs, both commented inline).
@@ -101,12 +110,14 @@ isn't safe to automate.
 
 **Rollback.** Both existing migrations have a working `downgrade()`. To roll
 back a release:
-1. Stop `web`: `docker compose -f docker-compose.prod.yml stop web`
-2. Check out the previous release's code/image.
+1. Stop `web` and `frontend`: `docker compose -f docker-compose.prod.yml stop web frontend`
+2. Check out the previous release's code/images.
 3. Downgrade one revision: `alembic downgrade -1` (run inside a container
    with the previous code, against the same `DATABASE_URL`) — or to a
    specific revision: `alembic downgrade <revision>`.
-4. Start `web` on the previous image: `docker compose -f docker-compose.prod.yml up -d web`
+4. Start both on the previous images: `docker compose -f docker-compose.prod.yml up -d web frontend`
+   (roll back together — a mismatched pair can mean the SPA shell references
+   a bundle/route the running backend doesn't have, or vice versa).
 
 **Restart behaviour.** Restarting the `web` container (`docker compose
 restart web`, a crash, a host reboot) logs out every currently-logged-in
@@ -146,21 +157,25 @@ acceptable for your users or whether to pin it.
   *exit*, not on a failed healthcheck, so a sustained DB outage leaves `web`
   running and quietly serving 503s/500s rather than restarting or alerting
   on its own.
-- **Image registry.** `docker-compose.prod.yml` builds from source
-  (`build: .`); nothing here pushes images to a registry. Rollback today
-  means checking out the previous release and rebuilding (works, per §2,
-  but slower and more error-prone mid-incident than an instant image swap).
-  Push tagged images to a registry (GHCR/ECR/etc.) if faster rollback matters.
+- **Image registry.** `docker-compose.prod.yml` builds `web` and `frontend`
+  from source; nothing here pushes either image to a registry. Rollback
+  today means checking out the previous release and rebuilding both (works,
+  per §2, but slower and more error-prone mid-incident than an instant image
+  swap). Push tagged images to a registry (GHCR/ECR/etc.) if faster rollback
+  matters.
 
 ---
 
 ## 4. Known limitations — not defects, deliberate scope
 
-- **Single container only.** Recordings live on a local Docker volume, so a
-  second replica can't see the first's files. Horizontal scaling needs
-  S3-compatible object storage (not implemented) and a shared
-  `SERVER_BOOT_ID`/rate-limit story (also not implemented — see
-  `E2E_Review.md`). Scale vertically instead.
+- **Single VM only** - `frontend`/`web`/`db` split into three images, but
+  none of them are horizontally scalable as shipped. Recordings live on a
+  local Docker volume, so a second `web` replica can't see the first's
+  files. Horizontal scaling needs S3-compatible object storage (not
+  implemented) and a shared `SERVER_BOOT_ID`/rate-limit story (also not
+  implemented — see `E2E_Review.md`). Scale vertically instead. (`frontend`
+  itself is stateless and would scale fine on its own - `web` and `db` are
+  what actually block this.)
 - **Single uvicorn worker**, pinned explicitly in the Dockerfile. Raising it
   gives each worker its own `SERVER_BOOT_ID` (random cross-worker 401s) and
   runs migrations concurrently in every worker on startup.
@@ -235,15 +250,17 @@ stays evergreen. Status of that audit's findings as of this doc's last edit:
       highest-value check here. Temporarily blank `JWT_SECRET` and confirm
       the app *refuses to start*. If it boots, it's running in development
       mode and every guard in §1 is silently off.
-- [ ] **Confirm no `.env` file is inside the built image**:
-      `docker run --rm zenoscribe ls -la /app` should show nothing but
+- [ ] **Confirm no `.env` file is inside the built backend image**:
+      `docker run --rm <web image> ls -la /app` should show nothing but
       `.env.example`/`.env.production.example` — no real `.env`/`.env.production`
       (CI's `docker-build` job checks this automatically on every push — see
-      `.github/workflows/ci.yml`).
+      `.github/workflows/ci.yml`). `frontend`'s image has no equivalent risk —
+      its build only ever copies `frontend/` into the build stage.
 - [ ] **Container-replacement test.** `docker compose -f
       docker-compose.prod.yml down && up -d` — recordings and users must
       survive (this is exactly what the named volumes exist to guarantee;
-      the only way to know they're wired right is to try it).
+      the only way to know they're wired right is to try it), and all four
+      services (`db`, `web`, `frontend`, `caddy`) must come back healthy.
 - [ ] **Restart behaviour on an active session** matches what you decided
       in §1/§2 for `SERVER_BOOT_ID`.
 - [ ] **End-to-end over real TLS**, not localhost: login, live record,

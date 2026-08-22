@@ -15,7 +15,14 @@ services:
     restart: unless-stopped
 
   web:
-    build: .
+    build:
+      context: .
+      # The Dockerfile's default target is `backend` (no frontend baked in
+      # - what production uses, see docker-compose.prod.yml). Dev needs the
+      # SPA shell served from this same container instead, since / and
+      # /login are proxied here by the Vite dev server - see the volumes
+      # comment below.
+      target: backend-with-frontend
     # Backend dev port is 3000 (paired with the Vite dev server at :8000,
     # which proxies /api, /ws, /ws/translate and /healthz here - see
     # frontend/vite.config.ts). Production stays on 8000 via
@@ -25,13 +32,13 @@ services:
     env_file:
       - .env
     # Only backend source is bind-mounted for live-edit convenience - the
-    # image's baked frontend/dist (built by the Dockerfile's frontend-build
-    # stage) is deliberately left alone so it isn't shadowed by a missing or
-    # stale host-side build. As a side effect, this already makes
-    # recordings/ (written under voice_transcriber/) persist on the host
-    # across `docker compose up`/`down` here in dev - production deploys
-    # don't get this mount and need their own volume, see the README's
-    # "Production" > Docker section.
+    # image's baked frontend/dist (built by the backend-with-frontend
+    # target's frontend-build stage) is deliberately left alone so it isn't
+    # shadowed by a missing or stale host-side build. As a side effect, this
+    # already makes recordings/ (written under voice_transcriber/) persist
+    # on the host across `docker compose up`/`down` here in dev - production
+    # deploys don't get this mount and need their own volume, see the
+    # README's "Production" > Docker section.
     volumes:
       - ./voice_transcriber:/app/voice_transcriber
       - ./alembic:/app/alembic

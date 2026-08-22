@@ -1,4 +1,24 @@
-# ---- Stage 1: build the React /home bundle (frontend/) ----
+# Two usable build targets - see docker-compose.prod.yml and
+# docker-compose.yml for which each one uses:
+#
+#   backend                (default target) Lean backend-only image, no
+#                           frontend/dist/ baked in. What production uses
+#                           (docker-compose.prod.yml's `web`) - the frontend
+#                           is built and served by its own container instead
+#                           (frontend/Dockerfile, nginx; see Caddyfile for
+#                           how the two are routed behind the same TLS
+#                           edge). Also what a bare `docker build .` and CI's
+#                           docker-build job produce, since it's the default
+#                           when no --target is given.
+#   backend-with-frontend  Same backend, plus frontend/dist/ baked in, so
+#                           voice_transcriber/server.py's SERVE_FRONTEND
+#                           check is true and page-serving routes/the
+#                           /static mount register too. Only
+#                           docker-compose.yml (local Docker dev parity)
+#                           uses this, via `target: backend-with-frontend`.
+
+# ---- Stage: build the React SPA (frontend/) - only feeds the
+# backend-with-frontend target below ----
 FROM node:20-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -6,7 +26,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# ---- Stage 2: install production Python deps ----
+# ---- Stage: install production Python deps ----
 # Build tools (build-essential/libssl-dev) live only in this stage, not the
 # final image - requirements.txt is the production-only dependency set (see
 # that file), which mostly has prebuilt wheels, but this stage stays in
@@ -23,8 +43,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /tmp/requirements.txt
 
-# ---- Stage 3: application image ----
-FROM python:3.12-slim
+# ---- Stage: common base for both backend targets below ----
+FROM python:3.12-slim AS app-base
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
@@ -39,9 +59,10 @@ COPY --from=python-deps /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY . /app
-# frontend/ is the single source dir for all frontend files; the backend
-# serves this build output directly (config.FRONTEND_DIST_DIR) - see the
-# repo README's "Frontend" section.
+
+# ---- Stage: backend-with-frontend (dev-parity only, see header comment) ----
+FROM app-base AS backend-with-frontend
+
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 # Created here (not left to config.py's RECORDINGS.mkdir() at import time)
@@ -75,5 +96,16 @@ EXPOSE 8000
 # these headers. Without this, every row in `failed_logins` (auth
 # forensics) and every rate-limit bucket (rate_limit.py) key off Caddy's IP
 # instead of the real client's.
+CMD uvicorn voice_transcriber.server:app --host 0.0.0.0 --port ${PORT:-8000} \
+    --workers 1 --proxy-headers --forwarded-allow-ips="*"
+
+# ---- Stage: backend (production, default target - see header comment) ----
+FROM app-base AS backend
+
+RUN mkdir -p /app/voice_transcriber/recordings && chown -R app:app /app
+USER app
+
+EXPOSE 8000
+
 CMD uvicorn voice_transcriber.server:app --host 0.0.0.0 --port ${PORT:-8000} \
     --workers 1 --proxy-headers --forwarded-allow-ips="*"

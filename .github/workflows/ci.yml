@@ -195,23 +195,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Builds the exact image the deploy team runs (docker-compose.prod.yml
-      # `build: .` uses this same Dockerfile). A broken Dockerfile - a stale
-      # COPY path, a frontend build failure, a dependency that only
-      # resolves on the dev machine - previously reached the deploy team as
-      # a surprise on their first deploy attempt instead of failing here.
-      - name: Build production image
-        run: docker build -t zenoscribe:ci .
+      # Builds the exact two images the deploy team runs
+      # (docker-compose.prod.yml's `web` and `frontend` services - see that
+      # file and Caddyfile for how they're routed). `db` is the stock
+      # postgres:16-alpine image, nothing to build there. A broken
+      # Dockerfile - a stale COPY path, a frontend build failure, a
+      # dependency that only resolves on the dev machine - previously
+      # reached the deploy team as a surprise on their first deploy attempt
+      # instead of failing here.
+      - name: Build backend image
+        run: docker build -t zenoscribe-backend:ci .
+
+      - name: Build frontend image
+        run: docker build -f frontend/Dockerfile -t zenoscribe-frontend:ci .
 
       # Confirms non-root (Dockerfile's USER app) and that no real .env file
-      # leaked into the image despite `COPY . /app` - .dockerignore should
-      # have excluded it, this is what actually proves that. Excludes
+      # leaked into the backend image despite `COPY . /app` - .dockerignore
+      # should have excluded it, this is what actually proves that. Excludes
       # .env.example/.env.production.example, which .dockerignore
-      # deliberately re-includes and are meant to ship.
-      - name: Sanity-check the built image
+      # deliberately re-includes and are meant to ship. Frontend's Dockerfile
+      # only ever COPYs frontend/ into its build stage, so it has no
+      # equivalent leak surface to check.
+      - name: Sanity-check the backend image
         run: |
-          docker run --rm zenoscribe:ci whoami | grep -qx app
-          leaked=$(docker run --rm zenoscribe:ci sh -c \
+          docker run --rm zenoscribe-backend:ci whoami | grep -qx app
+          leaked=$(docker run --rm zenoscribe-backend:ci sh -c \
             "ls -a /app | grep -E '^\.env' | grep -vE '^\.env\.(production\.)?example\$'" || true)
           if [ -n "$leaked" ]; then
             echo "::error::unexpected .env file(s) found inside the built image: $leaked"
@@ -219,14 +227,24 @@ jobs:
           fi
 
       # pip-audit/npm audit (dependency-audit job) cover known-vuln Python/JS
-      # packages; neither touches the python:3.12-slim base image itself.
-      # Trivy scans the actual built image - OS packages plus both language
-      # ecosystems - for known CVEs. ignore-unfixed: true so the gate doesn't
-      # go permanently red over a CVE with no available patch yet.
-      - name: Scan image for vulnerabilities (Trivy)
+      # packages; neither touches the python:3.12-slim or nginx:1.27-alpine
+      # base images themselves. Trivy scans each actual built image - OS
+      # packages plus both language ecosystems - for known CVEs.
+      # ignore-unfixed: true so the gate doesn't go permanently red over a
+      # CVE with no available patch yet.
+      - name: Scan backend image for vulnerabilities (Trivy)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: 'zenoscribe:ci'
+          image-ref: 'zenoscribe-backend:ci'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Scan frontend image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'zenoscribe-frontend:ci'
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'

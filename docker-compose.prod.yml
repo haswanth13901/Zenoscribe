@@ -1,12 +1,23 @@
 # Production Compose file - single VM, behind Caddy.
 #
-# Differences from docker-compose.yml (dev-only, left untouched):
+# Four services, three separately-built/pulled images:
+#   db        stock postgres:16-alpine, no custom Dockerfile
+#   web       backend only (Dockerfile's default `backend` target) - API/WS
+#             routes, nothing else. Built from the repo root.
+#   frontend  the SPA/login page, built and served by nginx
+#             (frontend/Dockerfile). Built from the repo root too (needs
+#             frontend/ from that context), just a different Dockerfile.
+#   caddy     TLS termination + routing between `web` and `frontend` - see
+#             Caddyfile for exactly which paths go where.
+#
+# Differences from docker-compose.yml (dev-only, left untouched, and a
+# single combined web container there - see that file's own comments):
 #   - no source bind-mounts; runs whatever was baked into the image at build
 #   - env_file: .env.production instead of .env
 #   - Postgres credentials come from the environment, not literals
-#   - `web` is not published to the host at all (`expose:` only) - Caddy is
-#     the only public entry point, reverse-proxying to `web` over the
-#     Compose network. See Caddyfile.
+#   - Neither `web` nor `frontend` is published to the host at all
+#     (`expose:` only) - Caddy is the only public entry point. See
+#     Caddyfile.
 #   - named volumes for both pgdata and recordings, so `down`/`up` and image
 #     upgrades don't lose data
 #   - per-service log rotation, so container logs can't fill the disk
@@ -50,6 +61,9 @@ services:
     logging: *default-logging
 
   web:
+    # Backend-only image (Dockerfile's default `backend` target - no
+    # frontend baked in). The frontend is the separate `frontend` service
+    # below; Caddy routes between the two - see Caddyfile.
     build: .
     env_file:
       - .env.production
@@ -76,6 +90,21 @@ services:
         condition: service_healthy
     logging: *default-logging
 
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/login.html"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging: *default-logging
+
   caddy:
     image: caddy:2-alpine
     ports:
@@ -88,6 +117,7 @@ services:
     restart: unless-stopped
     depends_on:
       - web
+      - frontend
     logging: *default-logging
 
 volumes:

@@ -1,7 +1,6 @@
 """Application entrypoint.
 
-Deliberately thin. It creates the app, serves the three pages, and mounts
-two independent routers:
+Deliberately thin. It creates the app and mounts two independent routers:
 
     routes_api.py   auth, user administration, recording access
     transcribe.py   the realtime Soniox bridge and turn-detection engine
@@ -9,10 +8,19 @@ two independent routers:
 Neither router imports the other. Both depend only on auth.py, db.py, and
 config.py, so the transcription engine can be reworked without touching
 login behaviour, and vice versa.
+
+Page-serving (the SPA shell, login.html, /static, service-worker.js) is
+registered only when frontend/dist/ actually exists on disk - see
+SERVE_FRONTEND below. It's absent by design in the production backend
+image (frontend/Dockerfile's nginx container serves pages there instead),
+but present in dev (docker-compose.yml, a plain `npm run build` +
+`uvicorn --reload`) and in the Vite-dev-server proxy workflow, so both
+keep working unchanged.
 """
 
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -101,79 +109,78 @@ def _shutdown():
     db.close_pool()
 
 
-@app.get("/")
-async def root():
-    # login.html is sourced from frontend/public/ (single source of truth
-    # for all frontend files - see the repo README's "Frontend" section)
-    # and lands here via Vite's public-dir copy when frontend/ is built.
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/login.html")
+# See the module docstring: absent in the production backend image (its own
+# frontend/nginx container serves pages instead), present in dev/Compose-dev,
+# where a build has actually produced this directory.
+SERVE_FRONTEND = Path(config.FRONTEND_DIST_DIR).is_dir()
 
+if SERVE_FRONTEND:
 
-@app.get("/login")
-async def login_page():
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/login.html")
+    @app.get("/")
+    async def root():
+        # login.html is sourced from frontend/public/ (single source of truth
+        # for all frontend files - see the repo README's "Frontend" section)
+        # and lands here via Vite's public-dir copy when frontend/ is built.
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/login.html")
 
+    @app.get("/login")
+    async def login_page():
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/login.html")
 
-@app.get("/home")
-@app.get("/home/")
-async def home_page():
-    # /home and /app are both client-side routes of the one React SPA built
-    # by frontend/ into frontend/dist/ - see the repo README's "Frontend"
-    # section to build it. More routes join this same shell as more pages
-    # migrate (admin, translate).
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
+    @app.get("/home")
+    @app.get("/home/")
+    async def home_page():
+        # /home and /app are both client-side routes of the one React SPA built
+        # by frontend/ into frontend/dist/ - see the repo README's "Frontend"
+        # section to build it. More routes join this same shell as more pages
+        # migrate (admin, translate).
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
+    @app.get("/app")
+    @app.get("/app/")
+    async def app_page():
+        # Both bare and trailing-slash forms are served directly so a stray
+        # slash doesn't cause a 307 redirect.
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
-@app.get("/app")
-@app.get("/app/")
-async def app_page():
-    # Both bare and trailing-slash forms are served directly so a stray
-    # slash doesn't cause a 307 redirect.
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
+    @app.get("/admin")
+    @app.get("/admin/")
+    async def admin_page():
+        # Gated to admins client-side - see RequireAuth's adminOnly prop in
+        # frontend/.
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
+    @app.get("/translate")
+    @app.get("/translate/")
+    async def translate_page():
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
-@app.get("/admin")
-@app.get("/admin/")
-async def admin_page():
-    # Gated to admins client-side - see RequireAuth's adminOnly prop in
-    # frontend/.
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
+    @app.get("/recordings")
+    @app.get("/recordings/")
+    async def recordings_page():
+        # Distinct from GET /api/recordings (routes_api.py).
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
+    @app.get("/upload")
+    @app.get("/upload/")
+    async def upload_page():
+        # Distinct from POST /api/transcribe/translate (transcribe.py), which
+        # this page's form submits to.
+        return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
-@app.get("/translate")
-@app.get("/translate/")
-async def translate_page():
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
-
-
-@app.get("/recordings")
-@app.get("/recordings/")
-async def recordings_page():
-    # Distinct from GET /api/recordings (routes_api.py).
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
-
-
-@app.get("/upload")
-@app.get("/upload/")
-async def upload_page():
-    # Distinct from POST /api/transcribe/translate (transcribe.py), which
-    # this page's form submits to.
-    return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
-
-
-@app.get("/service-worker.js")
-async def service_worker():
-    # Served from "/" rather than under the /static mount below: a service
-    # worker's default scope is capped at the directory it's served from,
-    # so serving it from /static/ would only ever let it control /static/
-    # requests. Service-Worker-Allowed widens that to the whole app - the
-    # file itself still lands in frontend/dist/ via Vite's public-dir copy,
-    # same mechanism as login.html/theme.css, just read from a second route.
-    return FileResponse(
-        f"{config.FRONTEND_DIST_DIR}/service-worker.js",
-        media_type="text/javascript",
-        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
-    )
+    @app.get("/service-worker.js")
+    async def service_worker():
+        # Served from "/" rather than under the /static mount below: a service
+        # worker's default scope is capped at the directory it's served from,
+        # so serving it from /static/ would only ever let it control /static/
+        # requests. Service-Worker-Allowed widens that to the whole app - the
+        # file itself still lands in frontend/dist/ via Vite's public-dir copy,
+        # same mechanism as login.html/theme.css, just read from a second route.
+        return FileResponse(
+            f"{config.FRONTEND_DIST_DIR}/service-worker.js",
+            media_type="text/javascript",
+            headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+        )
 
 
 @app.get("/healthz")
@@ -204,19 +211,20 @@ app.include_router(transcribe.router)
 app.include_router(translate.router)
 
 
-class NoCacheStaticFiles(StaticFiles):
-    """Forces revalidation on every request so browsers can't keep serving
-    a stale cached JS/CSS file after an update (ETag-based conditional
-    requests already work, so this costs only a cheap 304 when unchanged).
-    """
+if SERVE_FRONTEND:
 
-    def file_response(self, *args, **kwargs):
-        response = super().file_response(*args, **kwargs)
-        response.headers["Cache-Control"] = "no-cache"
-        return response
+    class NoCacheStaticFiles(StaticFiles):
+        """Forces revalidation on every request so browsers can't keep serving
+        a stale cached JS/CSS file after an update (ETag-based conditional
+        requests already work, so this costs only a cheap 304 when unchanged).
+        """
 
+        def file_response(self, *args, **kwargs):
+            response = super().file_response(*args, **kwargs)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
 
-# NOTE: the recordings directory is deliberately NOT mounted as static.
-# Serving it would let anyone with a filename bypass auth entirely.
-# All access goes through /api/recordings/{id}/audio, which checks ownership.
-app.mount("/static", NoCacheStaticFiles(directory=config.FRONTEND_DIST_DIR), name="static")
+    # NOTE: the recordings directory is deliberately NOT mounted as static.
+    # Serving it would let anyone with a filename bypass auth entirely.
+    # All access goes through /api/recordings/{id}/audio, which checks ownership.
+    app.mount("/static", NoCacheStaticFiles(directory=config.FRONTEND_DIST_DIR), name="static")

@@ -12,11 +12,20 @@ updates:
     schedule:
       interval: "weekly"
 
-  # Base image pinned in Dockerfile (python:3.12-slim) - CI's Trivy scan
-  # (docker-build job) catches CVEs in whatever's currently pinned; this
-  # opens the PR to bump the pin itself.
+  # Base images pinned in Dockerfile (python:3.12-slim, node:20-slim) -
+  # CI's Trivy scan (docker-build job) catches CVEs in whatever's currently
+  # pinned; this opens the PR to bump the pin itself.
   - package-ecosystem: "docker"
     directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Base images pinned in frontend/Dockerfile (node:20-slim,
+  # nginx:1.27-alpine) - Dependabot's docker ecosystem only looks in the
+  # exact directory given, not recursively, so this needs its own entry
+  # separate from the root Dockerfile above.
+  - package-ecosystem: "docker"
+    directory: "/frontend"
     schedule:
       interval: "weekly"
 

@@ -6,11 +6,12 @@
 # non-"localhost" site address - no separate certbot step.
 
 your-domain.example.com {
-	# `web` is the Compose service name for the FastAPI app - resolved via
-	# Docker's internal DNS on the Compose network. It is never published
-	# to the host (see docker-compose.prod.yml's `expose:`), so this is
-	# the only path a request can reach it by.
-	reverse_proxy web:8000
+	# `web` and `frontend` are Compose service names, resolved via Docker's
+	# internal DNS on the Compose network - neither is published to the
+	# host (see docker-compose.prod.yml's `expose:`), so this is the only
+	# path a request can reach either by. API/WS/health routes go to the
+	# backend; everything else (pages, /static assets, the service worker)
+	# falls through to the frontend nginx container.
 
 	# Live sessions (recording, translation) hold a WebSocket open for the
 	# length of a meeting. Caddy's default idle timeout would silently cut
@@ -24,6 +25,15 @@ your-domain.example.com {
 				write_timeout 0
 			}
 		}
+	}
+
+	@backend path /api/* /healthz
+	handle @backend {
+		reverse_proxy web:8000
+	}
+
+	handle {
+		reverse_proxy frontend:80
 	}
 
 	# Slightly above config.MAX_UPLOAD_MB (20MB) so the app's own limit is

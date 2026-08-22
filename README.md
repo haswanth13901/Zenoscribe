@@ -243,7 +243,11 @@ ENV=production uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 -
 ```
 
 Docker Compose (recommended — this is what `docker-compose.prod.yml` and
-`Caddyfile` in this repo are set up for; single VM behind Caddy for TLS):
+`Caddyfile` in this repo are set up for; single VM behind Caddy for TLS).
+Four containers, three separately-built/pulled images — `db` (stock
+`postgres:16-alpine`), `web` (backend only — API/WS routes, nothing else),
+`frontend` (the SPA/login page, built and served by nginx), and `caddy`
+(TLS + routes between `web`/`frontend` — see `Caddyfile`):
 
 ```bash
 cp .env.production.example .env.production   # fill in real values
@@ -257,10 +261,14 @@ required and is a different mechanism from `web`'s `env_file:` line inside
 DEPLOYMENT.md, for why both are needed. See DEPLOYMENT.md for the full
 runbook: first-boot admin seeding, backups, restart behaviour, rollback.
 
-Docker (single container, no Compose — example):
+Docker (single combined container, no Compose — example). A bare `docker
+build .` now produces the lean backend-only image (the Dockerfile's default
+target), so this path needs `--target backend-with-frontend` explicitly —
+the same combined backend+frontend image `docker-compose.yml` (dev) uses,
+frontend/dist/ baked in and all:
 
 ```bash
-docker build -t zenoscribe .
+docker build --target backend-with-frontend -t zenoscribe .
 docker run -p 8000:8000 -e ENV=production --env-file .env.production \
   -v zenoscribe-recordings:/app/voice_transcriber/recordings \
   zenoscribe
@@ -276,29 +284,33 @@ name reattaches to the same data, so recordings survive redeploys as long
 as this stays a single container on this host. You are also on your own for
 TLS termination in this path — the Compose path above gets it from Caddy.
 
-Either way, this assumes a single-container deployment. It does not extend
-to running multiple instances of the app at once (e.g. behind a load
-balancer for scale) — each instance would have its own local volume, so a
-recording saved by one instance wouldn't be visible from another, and each
-instance's own random `SERVER_BOOT_ID` would randomly log out users routed
-to a different instance. That needs S3-compatible object storage and a
-shared `SERVER_BOOT_ID` at minimum, neither implemented yet (see
-`E2E_Review.md`).
+Either way, this assumes a single VM. It does not extend to running
+multiple instances of the app at once (e.g. behind a load balancer for
+scale) — each instance would have its own local volume, so a recording
+saved by one instance wouldn't be visible from another, and each instance's
+own random `SERVER_BOOT_ID` would randomly log out users routed to a
+different instance. That needs S3-compatible object storage and a shared
+`SERVER_BOOT_ID` at minimum, neither implemented yet (see `E2E_Review.md`).
 
-The image runs as a non-root user (`USER app` in the Dockerfile) with
-`--workers 1` pinned explicitly — see the Dockerfile's comments for why
-raising worker count is unsafe without further changes.
+Both the backend and the combined single-container image run as a non-root
+user (`USER app` in the Dockerfile) with `--workers 1` pinned explicitly —
+see the Dockerfile's comments for why raising worker count is unsafe
+without further changes.
 
 Note: `docker-compose.yml` in this repo is for local development only (it
-bind-mounts backend source for live-edit and defaults to `.env`) — don't use
-it for production; use `docker-compose.prod.yml` instead.
+bind-mounts backend source for live-edit, defaults to `.env`, and builds the
+combined `backend-with-frontend` target) — don't use it for production; use
+`docker-compose.prod.yml` instead.
 
 Health check: `GET /healthz` reports liveness plus a Postgres readiness
 check (`{"status": "ok", "database": "ok"}`, or a 503 with `"degraded"` if
 the database is unreachable). It's unauthenticated by design — deliberately
 returns nothing beyond ok/degraded, no version or config — and is wired
 into `docker-compose.prod.yml`'s `web` healthcheck already; point external
-uptime monitoring at it too (over HTTPS, once Caddy is up).
+uptime monitoring at it too (over HTTPS, once Caddy is up). `frontend` has
+its own separate, simpler healthcheck (login page reachability) purely for
+Compose's own `restart:`/`depends_on` bookkeeping — not a substitute for
+watching `/healthz`.
 
 CI / E2E tests
 
@@ -460,12 +472,20 @@ dark-mode styling/boot, linked by `frontend/index.html`), and
 by raw URL rather than bundled — a browser requirement for worklet
 modules). Vite's `public/` dir copies these verbatim into `frontend/dist/`
 on every build, same as the rest of the bundle — no separate copy step,
-no second directory. `server.py` (`config.FRONTEND_DIST_DIR`) serves
-straight out of `frontend/dist/`: `/`, `/login`, and the `/static/*` mount
-all read from it directly, and so do `/home`, `/app`, `/admin`,
-`/translate`, `/recordings` and `/upload` (all serving
-`frontend/dist/index.html`, the SPA shell).
-There is no `voice_transcriber/static/` any more.
+no second directory. There is no `voice_transcriber/static/` any more.
+
+*Who actually serves `frontend/dist/` differs between dev and production*:
+`server.py` (`config.FRONTEND_DIST_DIR`, gated by its `SERVE_FRONTEND`
+check) serves straight out of it in dev — `/`, `/login`, and the
+`/static/*` mount all read from it directly, and so do `/home`, `/app`,
+`/admin`, `/translate`, `/recordings` and `/upload` (all serving
+`frontend/dist/index.html`, the SPA shell). In production
+(`docker-compose.prod.yml`), a separate `frontend` container (nginx,
+`frontend/Dockerfile` + `frontend/nginx.conf`) serves the exact same set of
+routes from its own copy of `frontend/dist/` instead — the backend image
+never contains it there, so `SERVE_FRONTEND` is false and those routes
+simply don't register on `web`. See DEPLOYMENT.md for the full production
+topology.
 
 The old vanilla `home.html`/`index.html`/`admin.html`/`translate.html` and
 the shared scripts they used
@@ -491,11 +511,13 @@ Open http://localhost:8000/home (or `/app`, `/admin`, `/translate`,
 `/recordings`, `/upload`, or `/login`). This writes everything the backend
 needs straight to `frontend/dist/` — the SPA shell, its hashed assets, and
 (via Vite's public-dir copy) `login.html`, `theme.css`, `theme-preboot.js`
-and `pcm-worklet.js`. Nothing else to copy, in Docker or out of it — the
-`Dockerfile`'s final stage just copies `frontend/dist/` from the build stage
-into the image at the same path. After any frontend change, rerun `npm
---prefix frontend run build` and refresh the browser — there's no
-hot-reload on this path.
+and `pcm-worklet.js`. In Docker, the equivalent is the Dockerfile's
+`backend-with-frontend` target (what `docker-compose.yml` uses), which
+copies `frontend/dist/` from its own build stage into the image at the same
+path; the default `backend` target (what production uses instead) skips
+that copy entirely — see the Dockerfile's own header comment. After any
+frontend change, rerun `npm --prefix frontend run build` and refresh the
+browser — there's no hot-reload on this path.
 
 **Vite dev server** (hot-reload — recommended while actively iterating on
 `frontend/`): a real `vite` dev server on `:8000` proxies `/api`,
