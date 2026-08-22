@@ -7,7 +7,7 @@
 # docker-compose.prod.yml's `frontend.build`.
 
 # ---- Stage 1: build the SPA ----
-FROM node:20-slim AS build
+FROM node:26-slim AS build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
