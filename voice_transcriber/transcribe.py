@@ -289,7 +289,6 @@ async def live(client: WebSocket):
 
                             async with lock:
                                 state["votes"][label] = state["votes"].get(label, 0) + 1
-                                # Attribute the in-progress turn to the current leader.
                                 state["speaker"] = max(
                                     state["votes"], key=state["votes"].get
                                 )

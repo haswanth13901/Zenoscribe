@@ -31,7 +31,7 @@ def test_admin_page_redirects_non_admin_to_app(live_server):
     from voice_transcriber import auth, db
 
     # A second, non-admin user seeded directly against the live_server
-    # fixture's tmp_path/app.db, before the subprocess ever started writing
+    # fixture's schema-scoped DB, before the subprocess ever started writing
     # to it - same trick the fixture itself uses for its own admin user.
     db.create_user("e2e_regular", auth.hash_password("RegularPass123!"), full_name="Regular User", role="user")
 
@@ -83,7 +83,7 @@ def test_admin_page_create_user_round_trip(live_server):
         page.click("text=Create user")
 
         page.wait_for_selector("text=Created e2e_created.", timeout=10000)
-        page.wait_for_selector("text=e2e_created", timeout=10000)  # new row in the table
+        page.wait_for_selector("text=e2e_created", timeout=10000)
 
         context.close()
         browser.close()
@@ -169,8 +169,8 @@ def test_admin_page_recordings_tab_download_and_delete(live_server):
     token = r.json()["token"]
     user_obj = r.json()["user"]
 
-    # Same pattern as test_e2e_playwright_app_page.py's recordings-drawer
-    # test: config.RECORDINGS isn't overridden for live_server, so the
+    # Same pattern as test_e2e_playwright_recordings_page.py:
+    # config.RECORDINGS isn't overridden for live_server, so the
     # transcript file has to exist for real for the download endpoint's
     # on-disk check to pass - cleaned up in `finally` regardless of outcome.
     rec_id = "20260101-000000-e2e_admin-def456"

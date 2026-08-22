@@ -1,6 +1,6 @@
 """Fast regression check for the /app route wiring after the React/RTK
 recorder migration: server.py serves the built frontend/dist shell
-(voice_transcriber/static/spa_dist/index.html), not the old index.html.
+(frontend/dist/index.html), not the old index.html.
 
 Deliberately does not execute any JS - that's covered by the Playwright
 test in test_e2e_playwright_app_page.py. This just proves the route/file

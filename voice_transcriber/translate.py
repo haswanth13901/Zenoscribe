@@ -207,7 +207,7 @@ async def translate(client: WebSocket):
             # Stay live through pauses, but end the session after a long silence.
             # last_speech_at tracks when real speech was last recognized (not
             # mere audio frames - the mic streams quiet audio continuously).
-            SILENCE_TIMEOUT = 20 * 60      # 20 minutes with no speech -> stop
+            SILENCE_TIMEOUT = 20 * 60
             KEEPALIVE_EVERY = 10           # seconds; Soniox drops idle >20s
             last_speech_at = {"t": loop.time()}
             last_audio_sent = {"t": loop.time()}
@@ -261,9 +261,6 @@ async def translate(client: WebSocket):
             utt_start = {"t": session_start}
 
             def _record_turn_and_clear():
-                """Append the just-closed utterance to `turns` (if it has any
-                content) and reset the per-utterance accumulators, mirroring
-                the reset already done at each utterance boundary."""
                 source = src_final["text"].strip()
                 translation = tgt_final["text"].strip()
                 if source or translation:
@@ -353,8 +350,6 @@ async def translate(client: WebSocket):
                         last_token_at["t"] = loop.time()
                         last_speech_at["t"] = loop.time()
 
-                        # Diarization: count this token's speaker toward the
-                        # current utterance's label.
                         if diarize:
                             sid = tok.get("speaker")
                             if sid is not None:

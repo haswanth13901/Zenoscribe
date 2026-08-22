@@ -11,9 +11,9 @@ function readTheme(): Theme {
   return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
 }
 
-/** Reads/writes the same localStorage key theme-preboot.js and the other
- * (still-vanilla) pages' theme-toggle.js use, so the choice made here
- * carries over to those pages and vice versa. */
+/** Reads/writes the same localStorage key theme-preboot.js uses on every
+ * page (including login.html), so the choice made here carries over there
+ * too. */
 export function useTheme(): { theme: Theme; toggleTheme: () => void } {
   const [theme, setTheme] = useState<Theme>(readTheme);
 

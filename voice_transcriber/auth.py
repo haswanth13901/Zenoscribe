@@ -183,8 +183,6 @@ def ensure_seed_admin():
             log.error("Missing or weak ADMIN_PASSWORD while running in production; refusing to auto-create admin")
             raise RuntimeError("Missing or weak ADMIN_PASSWORD in production environment")
     else:
-        # Development/testing: generate a password if none or weak, but mark it
-        # generated. Avoid printing the actual password directly to logs.
         if password and len(password) < MIN_PASSWORD_LENGTH:
             log.warning("ADMIN_PASSWORD is too weak; replacing with a generated password for development/testing")
             password = secrets.token_urlsafe(12)

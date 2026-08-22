@@ -13,13 +13,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from voice_transcriber import config as app_config  # noqa: E402
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-#
 # disable_existing_loggers=False is required here: fileConfig() defaults to
 # True, which silently disables every logger not listed in alembic.ini's
 # [loggers] section - including uvicorn's. Since db.init() runs this on every
@@ -46,17 +41,6 @@ def _sqlalchemy_url() -> str:
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
     context.configure(
         url=_sqlalchemy_url(),
         target_metadata=target_metadata,
@@ -69,12 +53,6 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = _sqlalchemy_url()
     connectable = engine_from_config(

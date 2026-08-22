@@ -12,8 +12,7 @@ import { MyRecordingsPage } from "@/pages/recordings/ui/MyRecordingsPage";
 import { UploadPage } from "@/pages/upload/ui/UploadPage";
 import "./index.css";
 
-// This is the last page in the staged migration - all four post-login
-// pages are now client-side routes of this one SPA.
+// All six post-login pages are client-side routes of this one SPA.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Provider store={store}>

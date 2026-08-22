@@ -12,7 +12,7 @@ export interface LanguagesResponse {
 
 // /api/languages is registered directly in server.py (not under
 // routes_api.py's router), but the path still resolves correctly against
-// baseApi's `${origin}/api` base. Reusable later by /translate's migration.
+// baseApi's `${origin}/api` base.
 export const languagesApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     getLanguages: builder.query<LanguagesResponse, void>({

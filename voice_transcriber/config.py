@@ -62,15 +62,13 @@ DEV_FRONTEND_ORIGIN = os.environ.get('DEV_FRONTEND_ORIGIN', 'http://localhost:80
 LOGIN_ATTEMPT_WINDOW_SEC = 300
 LOGIN_ATTEMPT_LIMIT = 5
 
-# Maximum batch upload size for /api/transcribe.
-# This is enforced on Content-Length when available and while streaming.
+# Enforced on Content-Length when available, and while streaming.
 MAX_UPLOAD_MB = 20
 MAX_UPLOAD_SIZE = MAX_UPLOAD_MB * 1024 * 1024
 
 # These only affect the engine in transcribe.py. Adjust them there-and-only
 # there when tuning turn detection; nothing in the auth layer reads them.
 
-# Flush a turn this many seconds after the last finalized token arrives.
 # Must exceed a normal speaking pause, or turns split mid-sentence.
 IDLE_FLUSH_SEC = 1.6
 

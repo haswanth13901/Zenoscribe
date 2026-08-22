@@ -12,8 +12,8 @@ matches the rest of the suite's posture of not asserting real-Soniox
 behavior outside the explicitly-gated real_network tests.
 
 Requires `npm --prefix frontend run build` (or the Docker build stage) to
-have produced voice_transcriber/static/spa_dist/ before this runs - see the
-README's "Frontend" section.
+have produced frontend/dist/ before this runs - see the README's "Frontend"
+section.
 """
 import pytest
 
@@ -60,8 +60,9 @@ def test_app_page_authenticated_render_and_start_stop(live_server):
     # no real Soniox credentials in this environment) - this cleanup is a
     # defensive backstop for that path regardless, so the test never leaves
     # artifacts in the real (non-isolated) recordings/ dir. config.RECORDINGS
-    # is not overridden for live_server (see the drawer test below), same
-    # reason this can't use an isolated temp dir here either.
+    # is not overridden for live_server (same reason
+    # test_e2e_playwright_recordings_page.py can't use an isolated temp dir
+    # either).
     before = set(config.RECORDINGS.glob(f"*-{live_server.admin_username}-*"))
     try:
         _run_start_stop_flow(live_server, token, user_obj)

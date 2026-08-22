@@ -234,7 +234,6 @@ def transcribe_file(
             return [{"speaker": "spk1", "text": "Hello world", "start": 0.0, "end": 1.0}]
 
     job_id = None
-    # Upload file (may be larger so allow a longer timeout)
     try:
         with open(path, "rb") as f:
             resp = requests.post(f"{REST}/v1/files", headers=get_headers(), files={"file": f}, timeout=UPLOAD_TIMEOUT)

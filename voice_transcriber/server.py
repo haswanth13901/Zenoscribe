@@ -127,46 +127,37 @@ async def home_page():
 @app.get("/app")
 @app.get("/app/")
 async def app_page():
-    # Same built SPA shell as /home (see above); react-router decides what
-    # renders client-side. Both the bare and trailing-slash forms are served
-    # directly so a stray slash doesn't cause a 307 redirect.
+    # Both bare and trailing-slash forms are served directly so a stray
+    # slash doesn't cause a 307 redirect.
     return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/admin")
 @app.get("/admin/")
 async def admin_page():
-    # Same built SPA shell as /home and /app; react-router decides what
-    # renders client-side (and gates it to admins - see RequireAuth's
-    # adminOnly prop in frontend/).
+    # Gated to admins client-side - see RequireAuth's adminOnly prop in
+    # frontend/.
     return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/translate")
 @app.get("/translate/")
 async def translate_page():
-    # Same built SPA shell as /home, /app and /admin; react-router decides
-    # what renders client-side.
     return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/recordings")
 @app.get("/recordings/")
 async def recordings_page():
-    # Same built SPA shell as the other four; the current user's own
-    # recordings, filterable by date - formerly a slide-out drawer over
-    # /app, now its own route. Distinct from GET /api/recordings (routes_api.py).
+    # Distinct from GET /api/recordings (routes_api.py).
     return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 
 @app.get("/upload")
 @app.get("/upload/")
 async def upload_page():
-    # Same built SPA shell as the other five; the batch transcribe form -
-    # formerly opened as a panel over /app or /admin via a ?upload=1
-    # deep-link, now its own route so it isn't rendered on top of either
-    # page's leftover content. Distinct from POST /api/transcribe/translate
-    # (transcribe.py), which this page's form submits to.
+    # Distinct from POST /api/transcribe/translate (transcribe.py), which
+    # this page's form submits to.
     return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
 

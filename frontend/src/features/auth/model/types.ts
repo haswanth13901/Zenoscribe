@@ -8,8 +8,7 @@ export interface AuthUser {
 }
 
 // GET /api/me returns this instead — same fields as AuthUser plus `email`,
-// which the login response does not include. Not used by the home pilot
-// yet, but recorded here since later pages (admin) will need it.
+// which the login response does not include.
 export interface MeResponse extends AuthUser {
   email: string;
 }

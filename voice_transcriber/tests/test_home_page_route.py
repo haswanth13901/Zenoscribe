@@ -1,6 +1,6 @@
 """Fast regression check for the /home route wiring after the React/RTK
 migration: server.py serves the built frontend/dist shell
-(voice_transcriber/static/spa_dist/index.html), not the old home.html.
+(frontend/dist/index.html), not the old home.html.
 
 Deliberately does not execute any JS - that's covered by the Playwright
 test in test_e2e_playwright_home_page.py. This just proves the route/file
