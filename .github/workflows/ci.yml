@@ -240,6 +240,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+          trivyignores: '.trivyignore'
 
       - name: Scan frontend image for vulnerabilities (Trivy)
         uses: aquasecurity/trivy-action@v0.36.0
@@ -249,6 +250,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+          trivyignores: '.trivyignore'
 
   dependency-audit:
     name: Dependency vulnerability audit

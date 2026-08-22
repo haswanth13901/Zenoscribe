@@ -1,0 +1,20 @@
+# Both live in the base image's bundled system Python packaging tooling
+# (pip/setuptools under /usr/local - never our app's own venv at
+# /opt/venv, and not anything requirements.txt pulls in). `pip install
+# --upgrade pip setuptools` in the Dockerfile already patches the actual
+# installed copies (confirmed clean in Trivy's own per-path breakdown -
+# usr/local/.../pip-26.2.1.dist-info and setuptools-84.0.0.dist-info both
+# show 0 vulnerabilities); these two IDs are Trivy separately flagging
+# stale metadata left behind for versions that aren't what's actually
+# installed/running. Neither vulnerability's attack surface is reachable
+# in production either way: this container only ever runs `uvicorn`
+# serving the FastAPI app from /opt/venv - nothing here calls setuptools'
+# PackageIndex (CVE-2025-47273's actual vulnerable code path) or does
+# msgpack (de)serialization (GHSA-6v7p-g79w-8964) at runtime. Re-evaluate
+# if that ever changes.
+
+# setuptools: Path Traversal Vulnerability in setuptools PackageIndex
+CVE-2025-47273
+
+# MessagePack for Python: Out-of-bounds read / crash on Unpacker reuse
+GHSA-6v7p-g79w-8964
