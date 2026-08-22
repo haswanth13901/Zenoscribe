@@ -49,7 +49,7 @@ admin console; there's no other user-creation path.
 unconditionally, idempotently, in-process, before the app starts serving
 traffic. There is no manual approval gate. A bad migration in a future
 release applies itself the moment the new image starts. This is a known,
-accepted limitation (§7) — plan releases accordingly (e.g. test the image
+accepted limitation (§4) — plan releases accordingly (e.g. test the image
 against a staging DB copy first) rather than expecting a pause point in
 production.
 
@@ -176,7 +176,36 @@ acceptable for your users or whether to pin it.
 
 ---
 
-## 5. Gate — run before calling a deploy done
+## 5. Known issues (2026-08-21 readiness audit)
+
+Full evidence, file:line citations, and the complete finding set (P0/P1/P2/Notes,
+verified vs. unverified) live in `DEPLOYMENT_READINESS_AUDIT.md` — kept as a
+separate, dated report rather than merged into this doc, since its findings are
+a snapshot against one commit and go stale as they're fixed, while this doc
+stays evergreen. The two P1s below are worth acting on before real production
+load; neither blocked the audit's overall GO WITH CONDITIONS verdict.
+
+1. **Blocking DB/bcrypt calls run on the single event loop.** `db.py` uses the
+   synchronous `psycopg_pool.ConnectionPool`, and `auth.py`/`routes_api.py`
+   call it — plus `bcrypt.hashpw`/`checkpw` — directly from `async def` route
+   handlers instead of wrapping in `asyncio.to_thread`. `transcribe.py` and
+   `translate.py` already wrap their DB/file calls this way; the HTTP API
+   routes and `auth.current_user` don't. With `--workers 1`, any HTTP
+   request — a login, an admin listing users — briefly stalls every live
+   `/ws`/`/ws/translate` session on the box, since they all share the one
+   event loop that request is blocking. **Fix:** wrap the direct `db.*` calls
+   in `routes_api.py` and in `auth.current_user`/`auth.user_from_token` in
+   `asyncio.to_thread`, the same pattern `transcribe.py` already uses.
+2. **Recordings disk growth (§3 above) has no automated alert, only a
+   documented manual watch.** ~115MB/hour of WAV per concurrent live
+   session, no retention policy, no cron/cleanup job anywhere in `scripts/`.
+   Not a code fix — **before turning on real traffic**, set up a
+   disk-usage alert on the VM (whatever monitoring tool is already in use),
+   sized against actual expected concurrent-usage hours.
+
+---
+
+## 6. Gate — run before calling a deploy done
 
 - [ ] **Clean-clone test.** Fresh `git clone` into an empty directory,
       `.env.production` filled in, `docker compose --env-file
