@@ -20,7 +20,7 @@ pydantic==2.13.4
 
 # Database (Postgres) & migrations
 psycopg[binary,pool]==3.2.10
-alembic==1.17.1
+alembic==1.19.1
 
 # Auth
 bcrypt==5.0.0
