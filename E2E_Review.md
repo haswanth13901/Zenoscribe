@@ -26,9 +26,12 @@ migrations auto-apply on startup.
 
 ## CI
 
-`.github/workflows/ci.yml` runs three jobs on every push: **backend-fast**
+`.github/workflows/ci.yml` runs five jobs on every push: **backend-fast**
 (`pytest -q`), **backend-integration** (the full `test_e2e_playwright_*.py`
-suite), and **frontend-unit** (Vitest).
+suite), **frontend-unit** (Vitest), **docker-build** (builds the production
+image and sanity-checks it runs non-root with no leaked `.env` file), and
+**dependency-audit** (`pip-audit` on `requirements.txt`, `npm audit` on the
+frontend).
 
 ## Open items
 

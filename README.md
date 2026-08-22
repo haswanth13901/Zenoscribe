@@ -142,14 +142,38 @@ database.
 
 3) Start the app (development)
 
+Two options, depending on whether you're touching the frontend:
+
+**Backend only** (frontend already built, or you're not changing it):
+
 ```bash
 # from the repository root
 uvicorn voice_transcriber.server:app --reload --port 8000
 ```
 
-Open http://localhost:8000 and sign in. The first-run admin user will be
-created automatically if no admin exists; in development a generated password may
-be used (the app will warn but will not print generated secrets in logs).
+Open http://localhost:8000 and sign in.
+
+**Backend + frontend, with hot-reload** (recommended when iterating on
+`frontend/`) — two terminals, backend on `:3000` and a real Vite dev server
+on `:8000`:
+
+```bash
+# terminal 1 - backend, no --reload needed for frontend-only edits
+uvicorn voice_transcriber.server:app --port 3000
+
+# terminal 2
+npm --prefix frontend run dev
+```
+
+Open http://localhost:8000 — Vite serves the React app there with HMR and
+proxies `/api`, `/healthz`, `/ws`, `/ws/translate`, and the two vanilla
+pages (`/` and `/login`) through to the backend on `:3000`, so the browser
+sees one effective origin. See "Frontend" below for how this split works
+and when you'd use it over the single-port option above.
+
+Either way, the first-run admin user will be created automatically if no
+admin exists; in development a generated password may be used (the app
+will warn but will not print generated secrets in logs).
 
 Production
 
@@ -349,7 +373,7 @@ RUN_REAL_SONIOX_TESTS=true pytest -q -m real_network
 ```bash
 # Build and run
 docker-compose up --build
-# Visit http://localhost:8000
+# Visit http://localhost:3000
 ```
 
 The image runs as a non-root user (Dockerfile's `USER app`). On Docker
@@ -444,9 +468,11 @@ and have since been deleted, now that the SPA is confirmed stable — restore
 them from git history (`git log -- voice_transcriber/static/`) if ever
 needed.
 
-Dev — there is no separate frontend dev server; FastAPI on `:8000` is the
-only thing you run, and it serves the frontend straight out of
-`frontend/dist/`. Build once, then start the backend:
+Dev — two ways to run the frontend, pick based on whether you're actively
+editing it:
+
+**Build-and-serve** (no hot-reload, simplest — good for a quick check or
+when you're not touching frontend code):
 
 ```bash
 npm --prefix frontend install   # first time only
@@ -456,16 +482,52 @@ uvicorn voice_transcriber.server:app --reload --port 8000
 
 Open http://localhost:8000/home (or `/app`, `/admin`, `/translate`,
 `/recordings`, `/upload`, or `/login`). This writes everything the backend
-needs straight to
-`frontend/dist/` — the SPA shell, its hashed assets, and (via Vite's
-public-dir copy) `login.html`, `theme.css`, `theme-preboot.js` and
-`pcm-worklet.js`. Nothing else to copy, in Docker or out of it — the
+needs straight to `frontend/dist/` — the SPA shell, its hashed assets, and
+(via Vite's public-dir copy) `login.html`, `theme.css`, `theme-preboot.js`
+and `pcm-worklet.js`. Nothing else to copy, in Docker or out of it — the
 `Dockerfile`'s final stage just copies `frontend/dist/` from the build stage
-into the image at the same path.
+into the image at the same path. After any frontend change, rerun `npm
+--prefix frontend run build` and refresh the browser — there's no
+hot-reload on this path.
 
-After any frontend change, rerun `npm --prefix frontend run build` and
-refresh the browser — there's no hot-reload, since Vite's dev server isn't
-used at all here.
+**Vite dev server** (hot-reload — recommended while actively iterating on
+`frontend/`): a real `vite` dev server on `:8000` proxies `/api`,
+`/healthz`, `/ws`, `/ws/translate`, and the two vanilla pages (`/` and
+`/login`) to the backend, which runs separately on `:3000`:
+
+```bash
+npm --prefix frontend install   # first time only
+
+# terminal 1
+uvicorn voice_transcriber.server:app --port 3000
+
+# terminal 2
+npm --prefix frontend run dev
+```
+
+Open http://localhost:8000/home (or `/app`, `/admin`, `/translate`,
+`/recordings`, `/upload`, or `/login`) — same routes as above, but edits to
+`frontend/src/` now hot-reload without a rebuild. The proxy (defined in
+`frontend/vite.config.ts`) is what keeps the browser effectively
+same-origin in dev, so code that reads `window.location` (`baseApi.ts`,
+`useRecorderConnection.ts`, `useTranslateConnection.ts`) works unchanged.
+Both ports are read from `FRONTEND_PORT`/`BACKEND_PORT` env vars if you ever
+need to change them (defaulting to 8000/3000, matching this convention).
+
+For requests that hit the backend's `:3000` directly instead of going
+through the Vite proxy (e.g. testing the API with curl), a dev-only CORS
+policy in `server.py` allows the origin in `DEV_FRONTEND_ORIGIN`
+(`voice_transcriber/config.py`, default `http://localhost:8000`) — gated off
+entirely when `config.PRODUCTION` is true, so it adds no CORS surface in
+production (which stays single-origin behind Caddy on `:8000`, unaffected
+by any of this).
+
+This dev split only affects local development — `docker-compose.yml`'s
+`web` service now defaults to `:3000` to match (paired with running `npm
+--prefix frontend run dev` on the host at `:8000`), while
+`docker-compose.prod.yml` and the Dockerfile are unchanged: production still
+builds `frontend/dist/` once and serves it from the single backend process
+on `:8000` via Caddy.
 
 Frontend tests:
 
