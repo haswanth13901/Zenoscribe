@@ -6,6 +6,53 @@ The fail-closed production guards, ownership checks, rate limiting, and the Cadd
 
 ---
 
+## Status update (2026-08-22)
+
+Fixed since this audit was written. Everything below this section is left
+exactly as originally reported — evidence, file:line citations, and all — as
+a historical snapshot against the audited commit; `DEPLOYMENT.md` §5 carries
+the evergreen, currently-maintained status instead of this doc (see that
+file's rationale for why the two are kept separate).
+
+- **P1-1 / P1-2 (blocking DB/bcrypt calls on the single event loop) — Fixed.**
+  Every direct `db.*` call in `routes_api.py` and in `auth.py`'s
+  `current_user`/`user_from_token`/`user_from_ws`, every
+  `bcrypt.hashpw`/`checkpw` call site, and `translate.py`'s WS auth path
+  (which had the same unwrapped `auth.user_from_token` call but wasn't
+  named in the original P1-1 evidence list) now run through
+  `asyncio.to_thread`, matching the pattern `transcribe.py` already used.
+  Verified: full `pytest -q` suite (81 passed, 21 deselected) green post-fix.
+- **P1-3 (recordings disk growth monitoring) — still open, operational.**
+  No code fix applies here by design (see the finding's own "smallest fix");
+  tracked as a pre-go-live task in `DEPLOYMENT.md` §3.
+- **P2 — WebSocket auth has no timeout on the first frame — Fixed.**
+  `auth.user_from_ws` (used by `transcribe.py`) and `translate.py` both now
+  wrap the first `receive_json()` in `asyncio.wait_for(..., timeout=10)`.
+- **P2 — unrelated repo content ships inside the production image — Fixed.**
+  `.dockerignore` now excludes `voice_transcriber/tests/` and
+  `voice_transcriber/code_reviews/`.
+- **P2 — no lint/type-check CI gate — Fixed.** A new `backend-lint` job runs
+  `flake8` as a blocking gate; the CI job count cited in that finding below
+  (5 jobs) is now 6. The 45 pre-existing `flake8` violations it caught were
+  fixed first so the gate starts green, not red.
+- **P2 — no container/base-image scan, no Dependabot — Fixed.** CI's
+  `docker-build` job now runs `aquasecurity/trivy-action` against the built
+  image (`CRITICAL,HIGH`, `exit-code: 1`, `ignore-unfixed: true`), and
+  `.github/dependabot.yml` opens weekly bump PRs for pip, npm, the Dockerfile
+  base image, and GitHub Actions. CodeQL/SAST and an SBOM remain open,
+  lower-urgency backlog.
+- **P2 — no image registry / no git tags yet — still open** (git tagging is
+  also in the Gate checklist, §6 of `DEPLOYMENT.md`). Tracked in
+  `DEPLOYMENT.md` §3.
+- **P2 — `/healthz` degradation has no automated remediation — unchanged.**
+  Still accurate as written; `DEPLOYMENT.md` §3 now calls out the specific
+  mechanism (restart policy triggers on exit, not on failed healthcheck) so
+  it isn't missed when wiring up monitoring.
+- **Notes — `@app.on_event` deprecation — unchanged**, still a same-effort,
+  no-risk cleanup whenever convenient, not launch-relevant.
+
+---
+
 ## P0 blockers
 
 **None found.** No auth bypass, no secret exposure in logs, no data-loss path, and no guaranteed-outage-in-week-one scenario turned up under direct tracing. See P1s below for the two items that should still be closed out promptly.

@@ -26,12 +26,15 @@ migrations auto-apply on startup.
 
 ## CI
 
-`.github/workflows/ci.yml` runs five jobs on every push: **backend-fast**
-(`pytest -q`), **backend-integration** (the full `test_e2e_playwright_*.py`
-suite), **frontend-unit** (Vitest), **docker-build** (builds the production
-image and sanity-checks it runs non-root with no leaked `.env` file), and
-**dependency-audit** (`pip-audit` on `requirements.txt`, `npm audit` on the
-frontend).
+`.github/workflows/ci.yml` runs six jobs on every push: **backend-lint**
+(`flake8`), **backend-fast** (`pytest -q`), **backend-integration** (the full
+`test_e2e_playwright_*.py` suite), **frontend-unit** (Vitest), **docker-build**
+(builds the production image, sanity-checks it runs non-root with no leaked
+`.env` file, then runs a Trivy scan against the built image and fails on any
+`CRITICAL`/`HIGH` vulnerability), and **dependency-audit** (`pip-audit` on
+`requirements.txt`, `npm audit` on the frontend). `.github/dependabot.yml`
+separately opens weekly version-bump PRs across pip, npm, the Dockerfile base
+image, and the workflow's own GitHub Actions.
 
 ## Open items
 

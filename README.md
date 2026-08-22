@@ -303,11 +303,15 @@ uptime monitoring at it too (over HTTPS, once Caddy is up).
 CI / E2E tests
 
 - The repository includes a GitHub Actions workflow (`.github/workflows/ci.yml`)
-  with five jobs: the fast pytest suite, the Playwright integration suite (all
+  with six jobs: a `flake8` lint gate over `voice_transcriber`/`scripts`, the
+  fast pytest suite, the Playwright integration suite (all
   `test_e2e_playwright_*.py` files), the frontend Vitest suite, a production
-  Docker image build (plus a sanity check for non-root and no leaked `.env`
-  file), and a dependency audit (`pip-audit` on `requirements.txt`, `npm
-  audit` on the frontend).
+  Docker image build (a sanity check for non-root and no leaked `.env` file,
+  plus a Trivy scan of the built image that fails on `CRITICAL`/`HIGH`
+  vulnerabilities), and a dependency audit (`pip-audit` on `requirements.txt`,
+  `npm audit` on the frontend). `.github/dependabot.yml` separately opens
+  weekly version-bump PRs for pip, npm, the Dockerfile base image, and the
+  workflow's own GitHub Actions.
 - No test-hook env vars need to be set at the job level: the `live_server`
   fixture that actually launches the test server always sets its own
   `ALLOW_TEST_HOOKS`/hook secret on the subprocess's environment directly.
@@ -354,6 +358,9 @@ python -m uvicorn voice_transcriber.server:app --port 8000
 3) Run the test suite (Playwright must be installed for the E2E test):
 
 ```bash
+# Lint: matches CI's backend-lint job exactly
+flake8 voice_transcriber scripts --max-line-length=120
+
 # Fast suite: isolated unit/API tests (no live server, no network, <10s)
 pytest -q
 

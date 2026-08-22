@@ -20,14 +20,14 @@ git-ignored.
 | Variable | Required? | Production example | What breaks if it's wrong |
 |---|---|---|---|
 | `ENV` | Required | `production` | Wrong/unset → app boots in `development` mode: generated JWT secret, auto-created admin with a printed password, every fail-fast guard below silently skipped. No startup error, because dev mode is a *valid* mode. See README's ".env.production reaches the container" section for how this actually gets set under Compose — it is not simply "put ENV=production in the file." |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Required (Compose path) | `zenoscribe` / *(strong, generated)* / `zenoscribe` | Used by `docker-compose.prod.yml` for both the `db` container and to build `web`'s `DATABASE_URL`. Left at the `zenoscribe`/`zenoscribe` dev default (public in this repo's git history) → production database is reachable with a publicly known password to anyone who can reach port 5432. Firewall it regardless (see §4) — this is defense in depth, not a substitute. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Required (Compose path) | `zenoscribe` / *(strong, generated)* / `zenoscribe` | Used by `docker-compose.prod.yml` for both the `db` container and to build `web`'s `DATABASE_URL`. Left at the `zenoscribe`/`zenoscribe` dev default (public in this repo's git history) → production database is reachable with a publicly known password to anyone who can reach port 5432. Firewall it regardless (see §3) — this is defense in depth, not a substitute. |
 | `DATABASE_URL` | Required (non-Compose path only) | `postgresql://user:pass@host:5432/zenoscribe` | Missing → app refuses to start (fail-fast in `config.py`). Not needed if using `docker-compose.prod.yml`, which derives it from the three vars above. |
 | `SONIOX_API_KEY` | Required | *(from console.soniox.com)* | Missing → app refuses to start. Wrong/expired/revoked → app boots fine, passes health checks, then throws on the first user who hits record — a generic 500 with nothing in the app logs pointing at the real cause. Test it end-to-end (§6/gate item) before calling the deploy done. |
 | `JWT_SECRET` | Required | 48-byte random string, `python -c "import secrets; print(secrets.token_urlsafe(48))"` | Missing → app refuses to start. Set once, keep stable — rotating it later force-logs-out every user (sometimes desired, e.g. after a suspected leak, but not routine). |
 | `ADMIN_USERNAME` | Optional | `admin` | Just the seeded first-admin username; harmless to leave default. |
 | `ADMIN_PASSWORD` | Required (first boot only) | strong password, ≥8 chars | Missing/weak → app refuses to start *if no admin exists yet* (i.e. blocks first boot only — irrelevant on every later restart once an admin row exists). |
 | `TOKEN_HOURS` | Optional | `8` | How long a login lasts before re-auth is required. No safety implication either way, just session-length UX. |
-| `SERVER_BOOT_ID` | **Strongly recommended** | a fixed generated string, e.g. another `token_urlsafe(16)` | **Left unset: every restart — not just a redeploy, also a crash loop, `docker compose restart`, a host reboot — force-logs-out every user**, independently of `JWT_SECRET` staying fixed. See README's `SERVER_BOOT_ID` section for the mechanism. Set it once to a fixed value if you don't want routine restarts to log everyone out; there's no way to revoke one specific session either way (§7, limitations). |
+| `SERVER_BOOT_ID` | **Strongly recommended** | a fixed generated string, e.g. another `token_urlsafe(16)` | **Left unset: every restart — not just a redeploy, also a crash loop, `docker compose restart`, a host reboot — force-logs-out every user**, independently of `JWT_SECRET` staying fixed. See README's `SERVER_BOOT_ID` section for the mechanism. Set it once to a fixed value if you don't want routine restarts to log everyone out; there's no way to revoke one specific session either way (§4, limitations). |
 | `ALLOW_TEST_HOOKS` | Must be `false` | `false` | App refuses to start if `true` in production — this is a safeguard already in code, this row is just confirming intent. Test hooks simulate upstream failures; never wanted in production. |
 | `TEST_HOOK_SECRET` | Leave blank | *(blank)* | Only meaningful when `ALLOW_TEST_HOOKS=true`, which production refuses anyway. |
 | `RESTRICT_TEST_HOOK_TO_LOCALHOST` | Leave `true` | `true` | Same — irrelevant once `ALLOW_TEST_HOOKS` is (correctly) `false`. |
@@ -141,7 +141,16 @@ acceptable for your users or whether to pin it.
 - **Disk monitoring.** Recordings and WAV files grow without bound — there
   is no retention/deletion policy in the app. Watch disk usage on the VM.
 - **Monitoring and alerting** against `GET /healthz` (§1 of README's
-  Production section describes the response shape).
+  Production section describes the response shape). Make sure it pages a
+  human — Docker's `restart: unless-stopped` only retries on container
+  *exit*, not on a failed healthcheck, so a sustained DB outage leaves `web`
+  running and quietly serving 503s/500s rather than restarting or alerting
+  on its own.
+- **Image registry.** `docker-compose.prod.yml` builds from source
+  (`build: .`); nothing here pushes images to a registry. Rollback today
+  means checking out the previous release and rebuilding (works, per §2,
+  but slower and more error-prone mid-incident than an instant image swap).
+  Push tagged images to a registry (GHCR/ECR/etc.) if faster rollback matters.
 
 ---
 
@@ -176,32 +185,42 @@ acceptable for your users or whether to pin it.
 
 ---
 
-## 5. Known issues (2026-08-21 readiness audit)
+## 5. Known issues (2026-08-21 readiness audit) — status
 
 Full evidence, file:line citations, and the complete finding set (P0/P1/P2/Notes,
 verified vs. unverified) live in `DEPLOYMENT_READINESS_AUDIT.md` — kept as a
 separate, dated report rather than merged into this doc, since its findings are
 a snapshot against one commit and go stale as they're fixed, while this doc
-stays evergreen. The two P1s below are worth acting on before real production
-load; neither blocked the audit's overall GO WITH CONDITIONS verdict.
+stays evergreen. Status of that audit's findings as of this doc's last edit:
 
-1. **Blocking DB/bcrypt calls run on the single event loop.** `db.py` uses the
-   synchronous `psycopg_pool.ConnectionPool`, and `auth.py`/`routes_api.py`
-   call it — plus `bcrypt.hashpw`/`checkpw` — directly from `async def` route
-   handlers instead of wrapping in `asyncio.to_thread`. `transcribe.py` and
-   `translate.py` already wrap their DB/file calls this way; the HTTP API
-   routes and `auth.current_user` don't. With `--workers 1`, any HTTP
-   request — a login, an admin listing users — briefly stalls every live
-   `/ws`/`/ws/translate` session on the box, since they all share the one
-   event loop that request is blocking. **Fix:** wrap the direct `db.*` calls
-   in `routes_api.py` and in `auth.current_user`/`auth.user_from_token` in
-   `asyncio.to_thread`, the same pattern `transcribe.py` already uses.
-2. **Recordings disk growth (§3 above) has no automated alert, only a
-   documented manual watch.** ~115MB/hour of WAV per concurrent live
-   session, no retention policy, no cron/cleanup job anywhere in `scripts/`.
-   Not a code fix — **before turning on real traffic**, set up a
-   disk-usage alert on the VM (whatever monitoring tool is already in use),
-   sized against actual expected concurrent-usage hours.
+**Fixed:**
+- **Blocking DB/bcrypt calls on the single event loop (P1).** Every direct
+  `db.*` call in `routes_api.py` and in `auth.py`'s `current_user`/
+  `user_from_token`/`user_from_ws`, plus every `bcrypt.hashpw`/`checkpw`
+  call site, and `translate.py`'s WS auth path, now run through
+  `asyncio.to_thread` — the same pattern `transcribe.py` already used.
+  Verified: full `pytest` suite green post-fix.
+- **WebSocket auth had no timeout on the first frame (P2).** Both
+  `auth.user_from_ws` (used by `transcribe.py`) and `translate.py` now wrap
+  the first `receive_json()` in `asyncio.wait_for(..., timeout=10)`.
+- **Unrelated repo content shipped inside the production image (P2).**
+  `.dockerignore` now excludes `voice_transcriber/tests/` and
+  `voice_transcriber/code_reviews/`.
+- **No lint CI gate (P2).** `backend-lint` now runs `flake8` as a blocking
+  CI job; the pre-existing violations it caught have been fixed.
+- **No container/base-image scan, no Dependabot (P2).** CI's `docker-build`
+  job now runs a Trivy scan (`CRITICAL,HIGH`, fails the build) against the
+  built image, and `.github/dependabot.yml` opens weekly bump PRs across
+  pip, npm, the Dockerfile base image, and GitHub Actions. CodeQL/SAST and
+  an SBOM remain backlog, lower urgency than the scan + Dependabot pair.
+
+**Still open (operational, not code — see §3):**
+- **Recordings disk growth has no automated alert**, only a documented
+  manual watch. ~115MB/hour of WAV per concurrent live session, no
+  retention policy anywhere in `scripts/`. Set up a disk-usage alert on the
+  VM before turning on real traffic — see §3's "Disk monitoring" bullet.
+- **No image registry / instant-rollback path yet** — see §3's "Image
+  registry" bullet.
 
 ---
 
@@ -233,6 +252,7 @@ load; neither blocked the audit's overall GO WITH CONDITIONS verdict.
       requirement, so a localhost-only test proves nothing about the real
       domain.
 - [ ] **Full test suite green** on the exact commit deployed:
+      `python -m flake8 voice_transcriber scripts --max-line-length=120`,
       `python -m pytest -q`, `npm --prefix frontend run build`,
       `npm --prefix frontend test`.
 - [ ] **Tag the release** you deploy — reference that tag in tickets/incident
