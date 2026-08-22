@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # requirements.txt (production) and requirements-dev.txt (test/lint tooling)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # frontend/package.json - React + Redux Toolkit SPA
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+
+  # Base image pinned in Dockerfile (python:3.12-slim) - CI's Trivy scan
+  # (docker-build job) catches CVEs in whatever's currently pinned; this
+  # opens the PR to bump the pin itself.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Actions pinned in .github/workflows/ci.yml (actions/checkout,
+  # actions/setup-python, aquasecurity/trivy-action, etc).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
