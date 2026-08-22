@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest frontend_server/tests -q)",
+      "Bash(python -m pytest voice_transcriber/tests -q)",
+      "Bash(python -m pip show psycopg psycopg-binary)",
+      "Bash(.venv/Scripts/python.exe -m pip show psycopg)",
+      "Bash(.venv/Scripts/python.exe -m pytest voice_transcriber/tests -q)",
+      "Bash(ENV=production .venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe -m py_compile voice_transcriber/tests/conftest.py voice_transcriber/tests/test_e2e_playwright_home_page.py voice_transcriber/tests/test_e2e_playwright_app_page.py voice_transcriber/tests/test_e2e_playwright_admin_page.py voice_transcriber/tests/test_e2e_playwright_translate_page.py voice_transcriber/tests/test_e2e_playwright_recordings_page.py voice_transcriber/tests/test_e2e_playwright_upload.py voice_transcriber/server.py voice_transcriber/config.py frontend_server/server.py frontend_server/config.py)",
+      "Bash(echo \"---exit:$?\")",
+      "Bash(PUBLIC_API_BASE_URL=http://localhost:8000 .venv/Scripts/python.exe -m uvicorn frontend_server.server:app --host 127.0.0.1 --port 18080)",
+      "Bash(curl -s http://127.0.0.1:18080/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:18080/home)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:18080/home/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{content_type}\\\\n\" http://127.0.0.1:18080/manifest.webmanifest)",
+      "Bash(curl -sI http://127.0.0.1:18080/service-worker.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:18080/api/languages)",
+      "Bash(kill %1)",
+      "Bash(PUBLIC_API_BASE_URL=http://localhost:8000 .venv/Scripts/python.exe -c ' *)",
+      "Bash(taskkill //F //PID 16976 //T)",
+      "Bash(taskkill //F //PID 14532 //T)",
+      "Bash(taskkill //F //PID 4628 //T)",
+      "Bash(git reset *)"
+    ]
+  }
+}
