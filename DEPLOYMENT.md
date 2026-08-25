@@ -224,42 +224,17 @@ acceptable for your users or whether to pin it.
 
 ---
 
-## 5. Known issues (2026-08-21 readiness audit) — status
+## 5. Known issues
 
-Full evidence, file:line citations, and the complete finding set (P0/P1/P2/Notes,
-verified vs. unverified) live in `DEPLOYMENT_READINESS_AUDIT.md` — kept as a
-separate, dated report rather than merged into this doc, since its findings are
-a snapshot against one commit and go stale as they're fixed, while this doc
-stays evergreen. Status of that audit's findings as of this doc's last edit:
-
-**Fixed:**
-- **Blocking DB/bcrypt calls on the single event loop (P1).** Every direct
-  `db.*` call in `routes_api.py` and in `auth.py`'s `current_user`/
-  `user_from_token`/`user_from_ws`, plus every `bcrypt.hashpw`/`checkpw`
-  call site, and `translate.py`'s WS auth path, now run through
-  `asyncio.to_thread` — the same pattern `transcribe.py` already used.
-  Verified: full `pytest` suite green post-fix.
-- **WebSocket auth had no timeout on the first frame (P2).** Both
-  `auth.user_from_ws` (used by `transcribe.py`) and `translate.py` now wrap
-  the first `receive_json()` in `asyncio.wait_for(..., timeout=10)`.
-- **Unrelated repo content shipped inside the production image (P2).**
-  `.dockerignore` now excludes `voice_transcriber/tests/` and
-  `voice_transcriber/code_reviews/`.
-- **No lint CI gate (P2).** `backend-lint` now runs `flake8` as a blocking
-  CI job; the pre-existing violations it caught have been fixed.
-- **No container/base-image scan, no Dependabot (P2).** CI's `docker-build`
-  job now runs a Trivy scan (`CRITICAL,HIGH`, fails the build) against the
-  built image, and `.github/dependabot.yml` opens weekly bump PRs across
-  pip, npm, the Dockerfile base image, and GitHub Actions. CodeQL/SAST and
-  an SBOM remain backlog, lower urgency than the scan + Dependabot pair.
-
-**Still open (operational, not code — see §3):**
-- **Recordings disk growth has no automated alert**, only a documented
-  manual watch. ~115MB/hour of WAV per concurrent live session, no
-  retention policy anywhere in `scripts/`. Set up a disk-usage alert on the
-  VM before turning on real traffic — see §3's "Disk monitoring" bullet.
-- **No image registry / instant-rollback path yet** — see §3's "Image
-  registry" bullet.
+Full evidence, file:line citations, and the complete current finding set
+(P0/P1/P2/Notes, verified vs. unverified) live in
+`DEPLOYMENT_READINESS_AUDIT.md`. That doc used to be a frozen dated snapshot
+with this section carrying the live fixed/open status separately — as of
+2026-08-24 it's rewritten in place instead, so it's now the one evergreen
+source for "is this finding still open," and this section is no longer
+duplicated here. The two operational items it currently flags as open —
+recordings disk-growth monitoring and certificate-expiry monitoring — are
+also tracked in §3 below.
 
 ---
 

@@ -463,8 +463,9 @@ All post-login pages — `/home`, `/app` (the recorder), `/admin`,
 `/translate`, `/recordings` (a user's own recordings, formerly a slide-out
 drawer over `/app`) and `/upload` (the batch transcribe form, formerly a
 `?upload=1` panel over `/app` or `/admin`) — are migrated off vanilla JS,
-completing the staged plan in `Update_Roadmap.txt` (`/home` → recorder →
-admin → translate). All six are client-side routes of one SPA in
+completing a staged migration (`/home` → recorder → admin → translate)
+tracked in scratch notes no longer in the repo. All six are client-side
+routes of one SPA in
 `frontend/` (Vite + React + TypeScript + Redux Toolkit/RTK Query) —
 react-router decides what renders (and gates `/admin` to admins
 client-side via `RequireAuth`'s `adminOnly` prop).
