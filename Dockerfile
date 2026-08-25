@@ -20,7 +20,7 @@
 
 # ---- Stage: build the React SPA (frontend/) - only feeds the
 # backend-with-frontend target below ----
-FROM node:20-slim AS frontend-build
+FROM node:25-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
