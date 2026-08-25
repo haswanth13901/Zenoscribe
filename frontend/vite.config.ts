@@ -30,7 +30,31 @@ const BACKEND_PORT = Number(process.env.BACKEND_PORT) || 3000;
 const backendTarget = `http://localhost:${BACKEND_PORT}`;
 
 export default defineConfig(({ command }) => ({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // login.html (a public/ file, served byte-for-byte in both dev and
+    // prod - see server.py's login_page()) hardcodes its asset paths under
+    // "/static/" to match production, where that prefix is mounted at the
+    // dist root (NoCacheStaticFiles in server.py / the /static/ location in
+    // nginx.conf). The dev server has no such mount - public/ files are
+    // served straight off "/" (base above) - so without this, every
+    // "/static/..." reference in login.html (login.js itself included) 404s
+    // and e.g. the sign-in button silently gets no click handler. Stripping
+    // the prefix here before Vite's own static/publicDir middleware runs
+    // reproduces the production mount in dev, for every "/static/" request,
+    // not just login.js.
+    {
+      name: "dev-static-prefix-passthrough",
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url?.startsWith("/static/")) {
+            req.url = req.url.slice("/static".length);
+          }
+          next();
+        });
+      },
+    },
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
