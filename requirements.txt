@@ -21,6 +21,11 @@ pydantic==2.13.4
 # Database (Postgres) & migrations
 psycopg[binary,pool]==3.2.10
 alembic==1.17.1
+# Pinned explicitly, not left to alembic's own transitive pin - alembic/env.py
+# and every migration file import it directly (`sa.Column` etc.), and it runs
+# on every app startup (db.init()), so an unpinned transitive bump could
+# silently break migrations.
+sqlalchemy==2.0.49
 
 # Auth
 bcrypt==5.0.0
