@@ -1,10 +1,11 @@
-# Frontend-only image: builds the SPA and serves it with nginx. Used by
-# docker-compose.prod.yml's `frontend` service; the backend has its own
-# image (../Dockerfile) and only ever handles /api, /ws, /ws/translate and
-# /healthz - see ../Caddyfile for how the two are routed behind the same
-# TLS edge. Build context for this Dockerfile is the repo root (not
+# Frontend + edge image: builds the SPA and serves it with nginx, which
+# also now does TLS termination and routing (see nginx.conf). Used by
+# docker-compose.prod.yml's `nginx` service; the backend has its own image
+# (../Dockerfile) and only ever handles /api, /ws, /ws/translate and
+# /healthz - see nginx.conf for how the two are routed behind the same TLS
+# edge. Build context for this Dockerfile is the repo root (not
 # frontend/), same as the backend, so both share one .dockerignore - see
-# docker-compose.prod.yml's `frontend.build`.
+# docker-compose.prod.yml's `nginx.build`.
 
 # ---- Stage 1: build the SPA ----
 FROM node:20-slim AS build

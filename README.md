@@ -243,15 +243,18 @@ ENV=production uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 -
 ```
 
 Docker Compose (recommended — this is what `docker-compose.prod.yml` and
-`Caddyfile` in this repo are set up for; single VM behind Caddy for TLS).
-Four containers, three separately-built/pulled images — `db` (stock
-`postgres:16-alpine`), `web` (backend only — API/WS routes, nothing else),
-`frontend` (the SPA/login page, built and served by nginx), and `caddy`
-(TLS + routes between `web`/`frontend` — see `Caddyfile`):
+`frontend/nginx.conf` in this repo are set up for; single VM behind nginx
+for TLS, certificate managed by a certbot sidecar). Four containers, three
+separately-built/pulled images — `db` (stock `postgres:16-alpine`), `web`
+(backend only — API/WS routes, nothing else), `nginx` (TLS termination,
+routing to `web`, and the SPA/login page, all in one container — see
+`frontend/nginx.conf`), and `certbot` (obtains/renews the Let's Encrypt
+certificate `nginx` serves):
 
 ```bash
-cp .env.production.example .env.production   # fill in real values
-# edit Caddyfile: replace your-domain.example.com with your real domain
+cp .env.production.example .env.production   # fill in real values, incl. DOMAIN/CERTBOT_EMAIL
+# edit frontend/nginx.conf: replace your-domain.example.com with your real domain
+./scripts/init-letsencrypt.sh                 # one-time TLS bootstrap - see DEPLOYMENT.md
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
 ```
 
@@ -259,7 +262,8 @@ The `--env-file .env.production` flag on the `docker compose` command is
 required and is a different mechanism from `web`'s `env_file:` line inside
 `docker-compose.prod.yml` — see the comment at the top of that file, and
 DEPLOYMENT.md, for why both are needed. See DEPLOYMENT.md for the full
-runbook: first-boot admin seeding, backups, restart behaviour, rollback.
+runbook: the TLS bootstrap step, first-boot admin seeding, backups, restart
+behaviour, rollback.
 
 Docker (single combined container, no Compose — example). A bare `docker
 build .` now produces the lean backend-only image (the Dockerfile's default
@@ -282,7 +286,8 @@ is a named Docker volume: Docker creates and persists it on the host the
 first time it's used, and every future `docker run` with the same volume
 name reattaches to the same data, so recordings survive redeploys as long
 as this stays a single container on this host. You are also on your own for
-TLS termination in this path — the Compose path above gets it from Caddy.
+TLS termination in this path — the Compose path above gets it from nginx
+(certificate managed by the `certbot` sidecar).
 
 Either way, this assumes a single VM. It does not extend to running
 multiple instances of the app at once (e.g. behind a load balancer for
@@ -307,10 +312,11 @@ check (`{"status": "ok", "database": "ok"}`, or a 503 with `"degraded"` if
 the database is unreachable). It's unauthenticated by design — deliberately
 returns nothing beyond ok/degraded, no version or config — and is wired
 into `docker-compose.prod.yml`'s `web` healthcheck already; point external
-uptime monitoring at it too (over HTTPS, once Caddy is up). `frontend` has
-its own separate, simpler healthcheck (login page reachability) purely for
-Compose's own `restart:`/`depends_on` bookkeeping — not a substitute for
-watching `/healthz`.
+uptime monitoring at it too (over HTTPS, once TLS is bootstrapped — see
+DEPLOYMENT.md). `nginx` has its own separate, simpler healthcheck (a fixed
+plain-HTTP `/healthz-nginx` response) purely for Compose's own
+`restart:`/`depends_on` bookkeeping — not a substitute for watching
+`/healthz`.
 
 CI / E2E tests
 
@@ -548,15 +554,16 @@ through the Vite proxy (e.g. testing the API with curl), a dev-only CORS
 policy in `server.py` allows the origin in `DEV_FRONTEND_ORIGIN`
 (`voice_transcriber/config.py`, default `http://localhost:8000`) — gated off
 entirely when `config.PRODUCTION` is true, so it adds no CORS surface in
-production (which stays single-origin behind Caddy on `:8000`, unaffected
-by any of this).
+production (which stays single-origin behind nginx, unaffected by any of
+this).
 
 This dev split only affects local development — `docker-compose.yml`'s
 `web` service now defaults to `:3000` to match (paired with running `npm
 --prefix frontend run dev` on the host at `:8000`), while
-`docker-compose.prod.yml` and the Dockerfile are unchanged: production still
-builds `frontend/dist/` once and serves it from the single backend process
-on `:8000` via Caddy.
+`docker-compose.prod.yml` and the Dockerfile are unchanged: production
+still builds `frontend/dist/` once, but serves it from the separate
+`nginx` container (not the backend process) — see the "Production" section
+above.
 
 Frontend tests:
 

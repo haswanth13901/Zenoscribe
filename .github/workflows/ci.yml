@@ -196,9 +196,9 @@ jobs:
         uses: actions/checkout@v4
 
       # Builds the exact two images the deploy team runs
-      # (docker-compose.prod.yml's `web` and `frontend` services - see that
-      # file and Caddyfile for how they're routed). `db` is the stock
-      # postgres:16-alpine image, nothing to build there. A broken
+      # (docker-compose.prod.yml's `web` and `nginx` services - see that
+      # file and frontend/nginx.conf for how they're routed). `db` is the
+      # stock postgres:16-alpine image, nothing to build there. A broken
       # Dockerfile - a stale COPY path, a frontend build failure, a
       # dependency that only resolves on the dev machine - previously
       # reached the deploy team as a surprise on their first deploy attempt

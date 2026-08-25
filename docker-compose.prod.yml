@@ -1,23 +1,25 @@
-# Production Compose file - single VM, behind Caddy.
+# Production Compose file - single VM, behind nginx.
 #
 # Four services, three separately-built/pulled images:
 #   db        stock postgres:16-alpine, no custom Dockerfile
 #   web       backend only (Dockerfile's default `backend` target) - API/WS
 #             routes, nothing else. Built from the repo root.
-#   frontend  the SPA/login page, built and served by nginx
-#             (frontend/Dockerfile). Built from the repo root too (needs
+#   nginx     TLS termination, routing to `web`, and the SPA/login static
+#             files, all in one container (frontend/Dockerfile,
+#             frontend/nginx.conf). Built from the repo root too (needs
 #             frontend/ from that context), just a different Dockerfile.
-#   caddy     TLS termination + routing between `web` and `frontend` - see
-#             Caddyfile for exactly which paths go where.
+#   certbot   stock certbot/certbot, no custom Dockerfile - obtains and
+#             renews the Let's Encrypt certificate `nginx` serves. See
+#             scripts/init-letsencrypt.sh for the required one-time first
+#             boot step.
 #
 # Differences from docker-compose.yml (dev-only, left untouched, and a
 # single combined web container there - see that file's own comments):
 #   - no source bind-mounts; runs whatever was baked into the image at build
 #   - env_file: .env.production instead of .env
 #   - Postgres credentials come from the environment, not literals
-#   - Neither `web` nor `frontend` is published to the host at all
-#     (`expose:` only) - Caddy is the only public entry point. See
-#     Caddyfile.
+#   - `web` is never published to the host at all (`expose:` only) - nginx
+#     is the only public entry point. See frontend/nginx.conf.
 #   - named volumes for both pgdata and recordings, so `down`/`up` and image
 #     upgrades don't lose data
 #   - per-service log rotation, so container logs can't fill the disk
@@ -62,8 +64,8 @@ services:
 
   web:
     # Backend-only image (Dockerfile's default `backend` target - no
-    # frontend baked in). The frontend is the separate `frontend` service
-    # below; Caddy routes between the two - see Caddyfile.
+    # frontend baked in). The frontend is the separate `nginx` service
+    # below; nginx routes between the two - see frontend/nginx.conf.
     build: .
     env_file:
       - .env.production
@@ -90,38 +92,61 @@ services:
         condition: service_healthy
     logging: *default-logging
 
-  frontend:
+  nginx:
+    # frontend/Dockerfile also now bakes in the TLS/routing config
+    # (frontend/nginx.conf) that used to live in `caddy` - see that file's
+    # header comment. Only this container is published to the host; `web`
+    # stays reachable only from inside the Compose network (`expose:`).
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    expose:
-      - "80"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    # nginx caches the certificate files in memory from when it last
+    # started/reloaded, so a renewal on disk (from `certbot`, below) needs
+    # a reload to actually take effect - there's no cross-container signal
+    # for that here, so nginx just reloads itself on a timer instead. A
+    # no-op reload when nothing changed is cheap and doesn't drop
+    # connections.
+    command: /bin/sh -c "while :; do sleep 6h & wait; nginx -s reload; done & nginx -g 'daemon off;'"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/login.html"]
+      # Plain HTTP, deliberately not routed through the HTTPS redirect -
+      # see frontend/nginx.conf's /healthz-nginx location comment for why.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/healthz-nginx"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
     restart: unless-stopped
-    logging: *default-logging
-
-  caddy:
-    image: caddy:2-alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    restart: unless-stopped
     depends_on:
       - web
-      - frontend
+    logging: *default-logging
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Renews twice a day; certbot itself only actually re-issues once the
+    # cert is within 30 days of expiry, so most runs are no-ops. `nginx`'s
+    # own periodic reload (see its `command` above) picks up a renewed
+    # cert without any cross-container signaling here.
+    entrypoint: >
+      sh -c "trap exit TERM; while :; do
+        certbot renew --webroot -w /var/www/certbot;
+        sleep 12h;
+      done"
+    restart: unless-stopped
+    depends_on:
+      - nginx
     logging: *default-logging
 
 volumes:
   pgdata:
   recordings:
-  caddy_data:
-  caddy_config:
+  certbot_conf:
+  certbot_www:

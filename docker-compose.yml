@@ -26,7 +26,7 @@ services:
     # Backend dev port is 3000 (paired with the Vite dev server at :8000,
     # which proxies /api, /ws, /ws/translate and /healthz here - see
     # frontend/vite.config.ts). Production stays on 8000 via
-    # docker-compose.prod.yml/Caddyfile, unaffected by this file.
+    # docker-compose.prod.yml/frontend/nginx.conf, unaffected by this file.
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     env_file:

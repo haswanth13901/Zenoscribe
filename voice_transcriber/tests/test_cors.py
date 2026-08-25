@@ -2,7 +2,7 @@
 see frontend/vite.config.ts). Confirms the preflight headers _DevOnlyCORSMiddleware
 (server.py) adds for config.DEV_FRONTEND_ORIGIN in development, and that they
 are entirely absent when config.PRODUCTION is True - production stays
-same-origin behind Caddy with no CORS surface at all.
+same-origin behind nginx with no CORS surface at all.
 """
 from voice_transcriber import config
 

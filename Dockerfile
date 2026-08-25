@@ -5,11 +5,12 @@
 #                           frontend/dist/ baked in. What production uses
 #                           (docker-compose.prod.yml's `web`) - the frontend
 #                           is built and served by its own container instead
-#                           (frontend/Dockerfile, nginx; see Caddyfile for
-#                           how the two are routed behind the same TLS
-#                           edge). Also what a bare `docker build .` and CI's
-#                           docker-build job produce, since it's the default
-#                           when no --target is given.
+#                           (frontend/Dockerfile, nginx; see
+#                           frontend/nginx.conf for how the two are routed
+#                           behind the same TLS edge). Also what a bare
+#                           `docker build .` and CI's docker-build job
+#                           produce, since it's the default when no
+#                           --target is given.
 #   backend-with-frontend  Same backend, plus frontend/dist/ baked in, so
 #                           voice_transcriber/server.py's SERVE_FRONTEND
 #                           check is true and page-serving routes/the
@@ -113,12 +114,12 @@ EXPOSE 8000
 #
 # --proxy-headers --forwarded-allow-ips="*" trusts X-Forwarded-* from
 # whatever calls this process directly. Safe here because in every shipped
-# deployment (docker-compose.prod.yml + Caddyfile) that's always Caddy on
-# the private Compose network - port 8000 is never published to the host
-# (see docker-compose.prod.yml's `expose:`) - so nothing else can spoof
-# these headers. Without this, every row in `failed_logins` (auth
-# forensics) and every rate-limit bucket (rate_limit.py) key off Caddy's IP
-# instead of the real client's.
+# deployment (docker-compose.prod.yml + frontend/nginx.conf) that's always
+# the `nginx` container on the private Compose network - port 8000 is
+# never published to the host (see docker-compose.prod.yml's `expose:`) -
+# so nothing else can spoof these headers. Without this, every row in
+# `failed_logins` (auth forensics) and every rate-limit bucket
+# (rate_limit.py) key off nginx's IP instead of the real client's.
 CMD uvicorn voice_transcriber.server:app --host 0.0.0.0 --port ${PORT:-8000} \
     --workers 1 --proxy-headers --forwarded-allow-ips="*"
 

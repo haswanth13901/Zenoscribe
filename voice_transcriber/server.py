@@ -63,7 +63,7 @@ class _DevOnlyCORSMiddleware:
     re-checked per-request elsewhere in this repo (routes_api.py), so tests
     can flip config.PRODUCTION via monkeypatch and see the change take
     effect on the same app/TestClient instance. Production stays same-origin
-    behind Caddy with zero CORS surface either way."""
+    behind nginx with zero CORS surface either way."""
 
     def __init__(self, app, **cors_kwargs):
         self._app = app
@@ -185,7 +185,7 @@ if SERVE_FRONTEND:
 
 @app.get("/healthz")
 async def healthz(response: Response):
-    """Liveness + readiness probe for Caddy/Compose/monitoring.
+    """Liveness + readiness probe for nginx/Compose/monitoring.
     Unauthenticated by design, but reports nothing beyond ok/degraded - no
     version, no config - so it's safe to leave open on the public path.
     """

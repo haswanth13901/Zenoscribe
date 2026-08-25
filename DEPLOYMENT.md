@@ -1,9 +1,9 @@
 # Zenoscribe — Deployment Guide
 
-For the deployment team. Target: a single Ubuntu VM, Docker Compose, Caddy
-in front for TLS. Replaces `Req._deployment.txt`, which predated the
-Compose + Caddy setup — this is the one current doc, don't split back into
-two.
+For the deployment team. Target: a single Ubuntu VM, Docker Compose, nginx
+in front for TLS (certbot-managed Let's Encrypt certificate). Replaces
+`Req._deployment.txt`, which predated the Compose setup — this is the one
+current doc, don't split back into two.
 
 **Four containers, three separately-built/pulled images** (`docker-compose.prod.yml`):
 
@@ -11,12 +11,12 @@ two.
 |---|---|---|
 | `db` | stock `postgres:16-alpine`, no custom Dockerfile | Postgres |
 | `web` | built from the repo root `Dockerfile` (its default `backend` target) | API/WS only - `/api/*`, `/ws`, `/ws/translate`, `/healthz`. No page-serving. |
-| `frontend` | built from `frontend/Dockerfile` (nginx) | The SPA shell, login page, and static assets |
-| `caddy` | `caddy:2-alpine` | TLS termination; routes `/api/*`/`/healthz`/`/ws*` to `web`, everything else to `frontend` - see `Caddyfile` |
+| `nginx` | built from `frontend/Dockerfile` (nginx) | TLS termination, routing (`/api/*`/`/healthz`/`/ws*` to `web`, everything else served locally), security headers, and the SPA shell/login page/static assets - see `frontend/nginx.conf` |
+| `certbot` | stock `certbot/certbot`, no custom Dockerfile | Obtains and renews the Let's Encrypt certificate `nginx` serves - see §2's "First-boot TLS bootstrap" |
 
 See also: `README.md`'s "Production" section (how to run it),
 `E2E_Review.md` (open architectural items), `docker-compose.prod.yml` and
-`Caddyfile` (the actual configs, both commented inline).
+`frontend/nginx.conf` (the actual configs, both commented inline).
 
 ---
 
@@ -28,6 +28,8 @@ git-ignored.
 
 | Variable | Required? | Production example | What breaks if it's wrong |
 |---|---|---|---|
+| `DOMAIN` | Required | `app.example.com` | Used by `scripts/init-letsencrypt.sh` and the `certbot` service's `-d` flag. Must also be hand-edited into `frontend/nginx.conf` (see that file's header comment) - left mismatched between the two, certbot requests a cert for a domain nginx isn't configured to answer for. |
+| `CERTBOT_EMAIL` | Required | *(a monitored address)* | Let's Encrypt's only channel for expiry/registration notices. Unlike Caddy's old automatic renewal, a broken `certbot` renewal loop here fails silently otherwise - this email is the one warning you get before the cert lapses. |
 | `ENV` | Required | `production` | Wrong/unset → app boots in `development` mode: generated JWT secret, auto-created admin with a printed password, every fail-fast guard below silently skipped. No startup error, because dev mode is a *valid* mode. See README's ".env.production reaches the container" section for how this actually gets set under Compose — it is not simply "put ENV=production in the file." |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Required (Compose path) | `zenoscribe` / *(strong, generated)* / `zenoscribe` | Used by `docker-compose.prod.yml` for both the `db` container and to build `web`'s `DATABASE_URL`. Left at the `zenoscribe`/`zenoscribe` dev default (public in this repo's git history) → production database is reachable with a publicly known password to anyone who can reach port 5432. Firewall it regardless (see §3) — this is defense in depth, not a substitute. |
 | `DATABASE_URL` | Required (non-Compose path only) | `postgresql://user:pass@host:5432/zenoscribe` | Missing → app refuses to start (fail-fast in `config.py`). Not needed if using `docker-compose.prod.yml`, which derives it from the three vars above. |
@@ -47,6 +49,20 @@ git-ignored.
 ---
 
 ## 2. Runbook
+
+**First-boot TLS bootstrap.** Before the very first `docker compose ... up
+-d`, run `./scripts/init-letsencrypt.sh` once (after filling in `DOMAIN`/
+`CERTBOT_EMAIL` in `.env.production` and hand-editing the domain into
+`frontend/nginx.conf`, per that file's header comment). This exists to
+break a chicken-and-egg problem: `nginx`'s TLS server block needs a
+certificate file just to start, but certbot can only obtain a real one by
+having `nginx` already up and serving the ACME challenge on port 80. The
+script writes a throwaway self-signed cert, starts `nginx` on it, requests
+the real certificate from Let's Encrypt, then reloads `nginx` onto it.
+Not needed again after that — the `certbot` service's own renew loop and
+`nginx`'s periodic self-reload (both in `docker-compose.prod.yml`) keep the
+certificate current from then on, unmonitored unless you set up the check
+described in §3.
 
 **First boot.** On first startup with an empty database, `db.init()` runs
 all Alembic migrations, then `auth.ensure_seed_admin()` creates one admin
@@ -69,10 +85,12 @@ production.
   Loss = loss of every `.wav`/`.mp3` and `.txt` transcript ever recorded.
   The DB row survives (it's in `pgdata`) but points at a file that no
   longer exists — see "drift" below.
-- `caddy_data` / `caddy_config` — Caddy's TLS certificate/state. Loss just
-  means Caddy re-issues a cert from Let's Encrypt on next start (rate
-  limits apply if this happens repeatedly in a short window — not a data
-  emergency, just avoid churning it).
+- `certbot_conf` / `certbot_www` — the Let's Encrypt certificate, account
+  key, and renewal state (`certbot_conf`), plus the ACME HTTP-01 challenge
+  webroot `nginx` and `certbot` share (`certbot_www`). Loss of
+  `certbot_conf` means re-running `scripts/init-letsencrypt.sh` to
+  re-issue from scratch (rate limits apply if this happens repeatedly in a
+  short window — not a data emergency, just avoid churning it).
 
 **Backup.**
 - Postgres: `pg_dump` on a schedule, stored *off* the VM. Nothing in this
@@ -110,12 +128,12 @@ isn't safe to automate.
 
 **Rollback.** Both existing migrations have a working `downgrade()`. To roll
 back a release:
-1. Stop `web` and `frontend`: `docker compose -f docker-compose.prod.yml stop web frontend`
+1. Stop `web` and `nginx`: `docker compose -f docker-compose.prod.yml stop web nginx`
 2. Check out the previous release's code/images.
 3. Downgrade one revision: `alembic downgrade -1` (run inside a container
    with the previous code, against the same `DATABASE_URL`) — or to a
    specific revision: `alembic downgrade <revision>`.
-4. Start both on the previous images: `docker compose -f docker-compose.prod.yml up -d web frontend`
+4. Start both on the previous images: `docker compose -f docker-compose.prod.yml up -d web nginx`
    (roll back together — a mismatched pair can mean the SPA shell references
    a bundle/route the running backend doesn't have, or vice versa).
 
@@ -137,8 +155,14 @@ acceptable for your users or whether to pin it.
 - **TLS, DNS, the domain.** Non-negotiable: browsers block `getUserMedia`
   (microphone capture) outside a secure context, so recording and
   translation simply do not function over plain HTTP on a real domain.
-  Point DNS at the VM, put the real domain in `Caddyfile`, and Caddy
-  handles the certificate automatically.
+  Point DNS at the VM, set `DOMAIN`/`CERTBOT_EMAIL` in `.env.production`
+  and hand-edit the same domain into `frontend/nginx.conf`, then run
+  `./scripts/init-letsencrypt.sh` once (§2). After that, `certbot` renews
+  automatically — but unlike Caddy, it won't warn you if that stops
+  working. **Set up a certificate-expiry monitoring check** (e.g. a cron
+  hitting `openssl s_client -connect $DOMAIN:443 -servername $DOMAIN
+  </dev/null 2>/dev/null | openssl x509 -noout -enddate`, alerting if
+  under ~14 days remain) — nothing in this repo does this for you.
 - **Firewall.** Only 80/443 should be publicly reachable. Ports 8000
   (`web`) and 5432 (`db`) must not be exposed — `docker-compose.prod.yml`
   already keeps `web` off the host via `expose:` instead of `ports:`, and
@@ -183,8 +207,8 @@ acceptable for your users or whether to pin it.
 - **No token revocation / no logout endpoint.** The only ways to kill a
   session early are deactivating the user or bouncing `SERVER_BOOT_ID`
   (which bounces *every* session, not just one).
-- **20 MB upload ceiling** (`config.MAX_UPLOAD_MB`; `Caddyfile`'s
-  `request_body max_size` is set slightly above this so the app's own
+- **20 MB upload ceiling** (`config.MAX_UPLOAD_MB`; `frontend/nginx.conf`'s
+  `client_max_body_size` is set slightly above this so the app's own
   limit is always what actually rejects an oversized file, with a clear
   message).
 - **`CREATE EXTENSION citext`** in the initial migration needs elevated
@@ -260,14 +284,18 @@ stays evergreen. Status of that audit's findings as of this doc's last edit:
       docker-compose.prod.yml down && up -d` — recordings and users must
       survive (this is exactly what the named volumes exist to guarantee;
       the only way to know they're wired right is to try it), and all four
-      services (`db`, `web`, `frontend`, `caddy`) must come back healthy.
+      services (`db`, `web`, `nginx`, `certbot`) must come back healthy.
 - [ ] **Restart behaviour on an active session** matches what you decided
       in §1/§2 for `SERVER_BOOT_ID`.
 - [ ] **End-to-end over real TLS**, not localhost: login, live record,
       translate, upload, download a transcript. Mic capture cannot be
       validated any other way — `localhost` is exempt from the secure-context
       requirement, so a localhost-only test proves nothing about the real
-      domain.
+      domain. While here, confirm the served certificate is genuinely
+      Let's Encrypt-issued, not `scripts/init-letsencrypt.sh`'s bootstrap
+      self-signed one — browsers show this clearly (padlock, no warning);
+      `openssl s_client -connect $DOMAIN:443 -servername $DOMAIN
+      </dev/null 2>/dev/null | openssl x509 -noout -issuer` also confirms it.
 - [ ] **Full test suite green** on the exact commit deployed:
       `python -m flake8 voice_transcriber scripts --max-line-length=120`,
       `python -m pytest -q`, `npm --prefix frontend run build`,
@@ -277,11 +305,19 @@ stays evergreen. Status of that audit's findings as of this doc's last edit:
 
 ---
 
-## 7. Open decision — replacing Caddy with nginx (not yet decided)
+## 7. Open decision — replacing Caddy with nginx (resolved 2026-08-24)
 
-Raised as a question, not started. Recorded here so the options aren't
-re-derived from scratch later. Nothing in the stack currently reflects
-this — `caddy` is still the edge in `docker-compose.prod.yml`.
+**Decided and implemented:** merge into the existing `frontend` nginx
+container (now named `nginx` in `docker-compose.prod.yml`), TLS via a
+`certbot` sidecar. See the services table at the top of this doc, §1's
+`DOMAIN`/`CERTBOT_EMAIL` rows, §2's "First-boot TLS bootstrap", §3's
+monitoring note, and §6's updated gate checklist. Left below as the
+historical record of why, per this doc's own practice of not re-deriving
+decisions from scratch.
+
+Raised as a question, not started at the time. Recorded here so the options
+weren't re-derived from scratch later. (Historical: at the time of writing,
+`caddy` was still the edge in `docker-compose.prod.yml`.)
 
 **What `caddy` actually does today** (`Caddyfile`): TLS termination with
 automatic Let's Encrypt issuance/renewal (zero config — just the domain
