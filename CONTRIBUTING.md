@@ -88,3 +88,29 @@ why and how it's wired up.
 
 See `README.md` for the full developer setup and `DEPLOYMENT.md` for the
 full production runbook.
+
+## Branch naming
+
+| Pattern | Use |
+|---|---|
+| `feature/<issue>-<slug>` | New functionality, branched from `dev` |
+| `fix/<issue>-<slug>` | Bug fix, branched from `dev` |
+| `hotfix/<issue>-<slug>` | Urgent production fix, branched from `main` (see Hotfix flow above) |
+| `chore/<slug>` | Maintenance/governance work with no tracking issue |
+| `docs/<slug>` | Documentation-only changes |
+
+## Commit messages
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<optional scope>): <description>
+```
+
+Common types: `feat`, `fix`, `chore`, `ci`, `docs`. For example:
+`feat(auth): add password reset flow` or `fix: correct off-by-one in turn
+attribution`.
+
+This isn't just style - `gh release create --generate-notes` groups the
+release notes by these types, so a consistent prefix makes the generated
+changelog for the next release actually readable.
