@@ -13,7 +13,7 @@ from alembic import command
 from alembic.config import Config
 from psycopg.rows import dict_row
 
-from voice_transcriber import config
+from voice_transcriber import config, db
 from voice_transcriber.tests.conftest import (
     _create_test_schema,
     _drop_test_schema,
@@ -121,3 +121,39 @@ def test_downgrade_removes_column_and_upgrade_restores_it(scoped_schema):
 
     command.upgrade(cfg, "head")
     assert "source" in _recordings_columns(scoped_schema)
+
+
+@pytest.fixture
+def reset_db_pool(monkeypatch):
+    """db.verify_schema_current()/get_current_revision() go through
+    db._get_pool(), unlike this file's other tests (which use raw psycopg
+    connections directly) - reset the pool so it targets scoped_schema's
+    DATABASE_URL instead of whatever a previous test's pool was cached
+    against, and close it again afterward so nothing leaks past this test."""
+    monkeypatch.setattr(db, "_pool", None)
+    yield
+    if db._pool is not None:
+        db._pool.close()
+        db._pool = None
+
+
+def test_get_head_revision_matches_latest_migration_file():
+    assert db.get_head_revision() == SOURCE_REVISION
+
+
+def test_verify_schema_current_passes_once_migrated_to_head(scoped_schema, reset_db_pool):
+    command.upgrade(_cfg(), "head")
+    db.verify_schema_current()  # must not raise
+
+
+def test_verify_schema_current_raises_when_behind_head(scoped_schema, reset_db_pool):
+    command.upgrade(_cfg(), PRE_SOURCE_REVISION)
+    with pytest.raises(RuntimeError):
+        db.verify_schema_current()
+
+
+def test_verify_schema_current_raises_on_never_migrated_database(scoped_schema, reset_db_pool):
+    # No command.upgrade() at all - alembic_version doesn't exist yet,
+    # simulating a fresh database nobody ran the migrate step against.
+    with pytest.raises(RuntimeError):
+        db.verify_schema_current()

@@ -24,4 +24,12 @@ else
 fi
 
 echo "[bootstrap] Done. Activate the venv with: source .venv/bin/activate"
-echo "[bootstrap] Note: the app and its tests need a reachable Postgres (DATABASE_URL) - run 'docker compose up -d db' or point DATABASE_URL at your own instance."
+
+# The app needs a reachable Postgres (DATABASE_URL) and Redis (REDIS_URL) -
+# every request 503s without Redis, and the app won't start without
+# Postgres. The fast test suite (pytest -q) doesn't need either - it uses
+# in-process fakes - but running the app itself, or the integration suite
+# (pytest -m integration), does. check_deps.py starts them via Docker if
+# available and verifies both are actually accepting connections, rather
+# than just telling you to go do it yourself.
+python "$(dirname "${BASH_SOURCE[0]}")/check_deps.py" || true

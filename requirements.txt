@@ -34,3 +34,11 @@ PyJWT==2.13.0
 # Config & HTTP (requests is used at runtime by soniox_client.py)
 python-dotenv==1.2.2
 requests==2.34.2
+
+# Shared state / object storage for horizontal scaling (see
+# SCALABILITY_DESIGN.md) - rate_limit.py (Redis) and voice_transcriber/storage/
+# (MinIO, S3-compatible). Both required in production; STORAGE_BACKEND=local
+# dev/test mode still imports storage/__init__.py's factory but only reaches
+# the minio import lazily if actually selected.
+redis==8.1.0
+minio==7.2.20

@@ -32,15 +32,19 @@ try:
     from . import config
     from . import db
     from . import languages
+    from . import live_sessions
     from . import rate_limit
     from . import soniox_client as sx
+    from . import storage
 except ImportError:  # run flat from inside the package dir
     import auth
     import config
     import db
     import languages
+    import live_sessions
     import rate_limit
     import soniox_client as sx
+    import storage
 
 log = logging.getLogger("translate")
 
@@ -76,7 +80,13 @@ async def translate(client: WebSocket):
     # else, same as the upload endpoints' per_user() limit but checked here
     # directly since WS auth happens via a frame, not a header FastAPI's
     # Depends() can see.
-    if not rate_limit.hit(f"ws-connect:{ws_user['id']}", 20, 300):
+    try:
+        allowed = await asyncio.to_thread(rate_limit.hit, f"ws-connect:{ws_user['id']}", 20, 300)
+    except rate_limit.RateLimiterUnavailable:
+        await client.send_json({"type": "error", "message": "Service temporarily unavailable, try again shortly"})
+        await client.close(code=1013)  # "Try Again Later"
+        return
+    if not allowed:
         await client.send_json({"type": "error", "message": "Too many connection attempts, try again shortly"})
         await client.close(code=4429)
         return
@@ -125,6 +135,12 @@ async def translate(client: WebSocket):
         await _fail(client, "Unknown mode")
         return
 
+    # Registered so a graceful shutdown (server.py's shutdown hook) can ask
+    # this session to wrap up - see the stop_requested check in
+    # idle_watchdog() below, and live_sessions.py's module docstring for
+    # why this is process-local, not shared state.
+    session_handle = live_sessions.register()
+
     alive = True
 
     async def to_browser(payload):
@@ -144,7 +160,9 @@ async def translate(client: WebSocket):
     started_at = datetime.now()
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
     session = f"{stamp}-{ws_user['username']}-translate-{uuid.uuid4().hex[:6]}"
-    wav_path = config.RECORDINGS / f"{session}.wav"
+    # Scratch location only - uploaded to storage and removed once the
+    # session ends (see _save_translate_session).
+    wav_path = config.live_scratch_dir() / f"{session}.wav"
 
     wf = wave.open(str(wav_path), "wb")
     wf.setnchannels(1)
@@ -390,14 +408,32 @@ async def translate(client: WebSocket):
                         _record_turn_and_clear()
 
             async def keepalive_and_silence():
-                # Two jobs on one clock:
+                # Three jobs on one clock:
                 #  - keepalive: if no audio has been forwarded recently, ping
                 #    Soniox so it doesn't drop the session at its 20s idle limit.
                 #  - silence timeout: if no speech has been recognized for
                 #    SILENCE_TIMEOUT, end the session (stays live through short
                 #    and moderate pauses, stops only after a long true silence).
+                #  - graceful shutdown: session_handle.stop_requested is set by
+                #    server.py's shutdown hook. Closes `client` directly
+                #    (rather than only asking the browser to close, like the
+                #    silence-timeout branch below does) so a slow/uncooperative
+                #    tab can't block the shutdown drain - this unblocks
+                #    pump_mic()'s client.receive() immediately, cascading into
+                #    the same teardown/persist path a normal disconnect takes.
                 while alive:
                     await asyncio.sleep(1.0)
+                    if session_handle.stop_requested.is_set():
+                        await to_browser({"type": "server_restarting"})
+                        try:
+                            await stt.send(b"")
+                        except Exception:
+                            pass
+                        try:
+                            await client.close(code=1001)  # "Going Away"
+                        except Exception:
+                            pass
+                        break
                     now = loop.time()
                     if now - last_audio_sent["t"] > KEEPALIVE_EVERY:
                         try:
@@ -436,6 +472,7 @@ async def translate(client: WebSocket):
         log.exception("translate bridge error")
         await to_browser({"type": "error", "message": str(e)})
     finally:
+        session_handle.unregister()
         alive = False
         await write_queue.put(None)
         try:
@@ -472,33 +509,36 @@ def _wav_duration(path):
 
 
 async def _save_translate_session(session, ws_user, wav_path, started_at, turns):
-    """Persist a finished, non-empty translate session: transcript, wav
-    duration, DB row. Extracted out of the websocket handler's `finally`
-    block so it can be exercised directly in tests (translate.py has no
-    fake-mode/mock harness for the live Soniox connection, unlike
-    transcribe_file's ALLOW_TEST_HOOKS path, so this is otherwise only
-    reachable with real Soniox credentials).
+    """Persist a finished, non-empty translate session: transcript upload,
+    audio upload, wav duration, DB row. Extracted out of the websocket
+    handler's `finally` block so it can be exercised directly in tests
+    (translate.py has no fake-mode/mock harness for the live Soniox
+    connection, unlike transcribe_file's ALLOW_TEST_HOOKS path, so this is
+    otherwise only reachable with real Soniox credentials).
 
-    Each of the three writes is caught and logged independently, so a
-    failure in one is diagnosable from the log message alone and doesn't
-    skip the other two - unlike the single try/except this replaced, which
-    swallowed all three under one generic message and could leave a WAV
-    orphaned with no transcript and no DB row.
+    Each write is caught and logged independently, so a failure in one is
+    diagnosable from the log message alone and doesn't skip the others -
+    unlike a single try/except, which would swallow everything under one
+    generic message and could leave a WAV orphaned with no transcript and no
+    DB row. Duration is read from the local scratch file *before* uploading
+    it - storage.upload() consumes (deletes) the local copy on success.
     """
-    txt_path = config.RECORDINGS / f"{session}.txt"
+    wav_key = storage.recording_key(ws_user["id"], session, ".wav")
+    txt_key = storage.recording_key(ws_user["id"], session, ".txt")
+
     try:
         await asyncio.to_thread(
-            txt_path.write_text,
+            storage.get_storage().upload_text,
+            txt_key,
             "\n".join(
                 f"[{t['start']:.1f}s] {t['speaker'] or 'user-1'}"
                 f" ({t['language'] or '?'}): {t['source']}\n"
                 f"    -> {t['translation']}"
                 for t in turns
             ),
-            encoding="utf-8",
         )
     except Exception:
-        log.exception("failed to write translate transcript %s", txt_path)
+        log.exception("failed to write translate transcript %s", txt_key)
 
     try:
         duration = await asyncio.to_thread(_wav_duration, wav_path)
@@ -506,14 +546,19 @@ async def _save_translate_session(session, ws_user, wav_path, started_at, turns)
         duration = 0.0
         log.exception("failed to read translate wav duration %s", wav_path)
 
+    try:
+        await asyncio.to_thread(storage.get_storage().upload, wav_key, wav_path, "audio/wav")
+    except Exception:
+        log.exception("failed to store translate recording audio %s", wav_key)
+
     preview = " ".join(t["translation"] or t["source"] for t in turns)[:160]
     try:
         await asyncio.to_thread(
             db.add_recording,
             session,
             ws_user["id"],
-            wav_path.name,
-            txt_path.name,
+            wav_key,
+            txt_key,
             started_at.isoformat(),
             duration,
             len(turns),

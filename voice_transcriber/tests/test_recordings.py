@@ -4,16 +4,20 @@ Ports the recordings portion of the old full_endpoint_test.py.
 """
 import pytest
 
-from voice_transcriber import db
+from voice_transcriber import db, storage
+from voice_transcriber.storage.local import LocalStorageService
 
 
 @pytest.fixture
 def seeded_recording(isolated_recordings, isolated_db, make_user):
     user_id = make_user("rec_user", "RecPass123!")
-    (isolated_recordings / "r.txt").write_text("Hello from test.", encoding="utf-8")
-    (isolated_recordings / "r.wav").write_bytes(b"RIFF....WAVEfmt ")
+    txt_key = storage.recording_key(user_id, "rec-1", ".txt")
+    wav_key = storage.recording_key(user_id, "rec-1", ".wav")
+    (isolated_recordings / txt_key).parent.mkdir(parents=True, exist_ok=True)
+    (isolated_recordings / txt_key).write_text("Hello from test.", encoding="utf-8")
+    (isolated_recordings / wav_key).write_bytes(b"RIFF....WAVEfmt ")
     db.add_recording(
-        "rec-1", user_id, "r.wav", "r.txt",
+        "rec-1", user_id, wav_key, txt_key,
         "2026-01-01T00:00:00", 1.2, 1, "Hello", "transcribe",
     )
     return user_id, "rec-1"
@@ -159,3 +163,33 @@ def test_invalid_date_filter_returns_400_not_500(client, seeded_recording):
     headers = _login(client, "rec_user", "RecPass123!")
     r = client.get("/api/recordings", headers=headers, params={"date_from": "not-a-date"})
     assert r.status_code == 400
+
+
+def test_transcript_returns_503_not_500_when_storage_backend_errors(
+    client, seeded_recording, monkeypatch,
+):
+    """Distinct from a missing object (404): the backend itself being
+    unreachable (a MinIO outage, a disk error) should read as "try again
+    shortly," not silently 500 or incorrectly imply the recording doesn't
+    exist."""
+    def _raise(self, key):
+        raise ConnectionError("simulated storage backend outage")
+
+    monkeypatch.setattr(LocalStorageService, "get_text", _raise)
+    _, rec_id = seeded_recording
+    headers = _login(client, "rec_user", "RecPass123!")
+    r = client.get(f"/api/recordings/{rec_id}/transcript", headers=headers)
+    assert r.status_code == 503
+
+
+def test_audio_returns_503_not_500_when_storage_backend_errors(
+    client, seeded_recording, monkeypatch,
+):
+    def _raise(self, key):
+        raise ConnectionError("simulated storage backend outage")
+
+    monkeypatch.setattr(LocalStorageService, "open_stream", _raise)
+    _, rec_id = seeded_recording
+    headers = _login(client, "rec_user", "RecPass123!")
+    r = client.get(f"/api/recordings/{rec_id}/audio", headers=headers)
+    assert r.status_code == 503

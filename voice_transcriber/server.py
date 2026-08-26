@@ -20,6 +20,7 @@ keep working unchanged.
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Response
@@ -32,7 +33,9 @@ try:
     from . import config
     from . import db
     from . import languages
+    from . import live_sessions
     from . import rate_limit
+    from . import redis_client
     from . import routes_api
     from . import transcribe
     from . import translate
@@ -41,7 +44,9 @@ except ImportError:  # run flat from inside the package dir
     import config
     import db
     import languages
+    import live_sessions
     import rate_limit
+    import redis_client
     import routes_api
     import transcribe
     import translate
@@ -86,9 +91,37 @@ app.add_middleware(
 )
 
 
+_ready = True
+
+# How long a graceful shutdown waits for active live sessions (transcribe.py
+# /ws, translate.py /ws/translate) to wrap up and persist their recording
+# before the process exits. Whatever's still running the process exits
+# behaves like today's un-graceful restart already does (session lost) -
+# this is a best-effort improvement, not a hard guarantee (see
+# live_sessions.py). Must be shorter than however long the container
+# orchestrator waits before SIGKILL-ing the process (Docker Compose's
+# `stop_grace_period`, set accordingly in docker-compose.prod.yml) or the
+# drain gets killed mid-wait with no benefit over not draining at all.
+GRACEFUL_SHUTDOWN_GRACE_SEC = int(os.environ.get("GRACEFUL_SHUTDOWN_GRACE_SEC", "30"))
+
+
 @app.on_event("startup")
 def _startup():
-    db.init()
+    # Reset explicitly: a real production process only starts once, but
+    # TestClient (see conftest.py's `client` fixture) runs a full
+    # startup/shutdown cycle per test against this same shared `app`
+    # instance, and _shutdown() below flips this to False - without
+    # resetting it here, every test after the first would see /healthz
+    # permanently report "shutting_down".
+    global _ready
+    _ready = True
+
+    # Migrations are NOT run here (see db.init()'s docstring) - this only
+    # verifies the schema a deploy-time migration step already applied is
+    # the one this code expects, and refuses to serve otherwise. Required
+    # once more than one replica can start concurrently (see
+    # SCALABILITY_AUDIT.md finding F4); harmless for a single instance too.
+    db.verify_schema_current()
     seeded = auth.ensure_seed_admin()
     if seeded:
         username, generated_flag = seeded
@@ -105,8 +138,26 @@ def _startup():
 
 
 @app.on_event("shutdown")
-def _shutdown():
+async def _shutdown():
+    # Flip /healthz to unready immediately so an external load balancer/
+    # orchestrator stops routing new requests and new WS connection
+    # attempts here - see the /healthz handler below. This is the FastAPI/
+    # Starlette "lifespan shutdown" hook, which fires as soon as uvicorn
+    # begins its own shutdown sequence (SIGTERM), independent of however
+    # long the rest of this function takes.
+    global _ready
+    _ready = False
+
+    still_active = await live_sessions.request_shutdown_and_wait(GRACEFUL_SHUTDOWN_GRACE_SEC)
+    if still_active:
+        log.warning(
+            "shutdown: %d live session(s) still active after %ds grace period; "
+            "exiting anyway (matches an ordinary ungraceful restart's behavior)",
+            still_active, GRACEFUL_SHUTDOWN_GRACE_SEC,
+        )
+
     db.close_pool()
+    redis_client.close_client()
 
 
 # See the module docstring: absent in the production backend image (its own
@@ -188,7 +239,17 @@ async def healthz(response: Response):
     """Liveness + readiness probe for nginx/Compose/monitoring.
     Unauthenticated by design, but reports nothing beyond ok/degraded - no
     version, no config - so it's safe to leave open on the public path.
+
+    Checked first, before touching the database at all: once a graceful
+    shutdown has started (_shutdown() in this module), this immediately
+    reports unready so an external load balancer stops routing new
+    requests/WS connections here - see GRACEFUL_SHUTDOWN_GRACE_SEC's
+    docstring above for why this needs to happen before, not during, the
+    session-drain wait.
     """
+    if not _ready:
+        response.status_code = 503
+        return {"status": "shutting_down", "database": "unknown"}
     try:
         await asyncio.to_thread(db.ping)
     except Exception:

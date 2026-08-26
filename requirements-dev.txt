@@ -29,6 +29,18 @@ playwright==1.62.0
 # `client` fixture) - not a runtime dependency of the app itself.
 httpx==0.28.1
 
+# In-memory Redis stand-in for rate_limit.py's tests (isolated_redis fixture,
+# conftest.py) - no real Redis server is available/needed for the fast suite.
+# rate_limit.py's sliding-window logic is a Lua script (EVAL/EVALSHA), which
+# fakeredis only supports via the `lua` extra (lupa) - plain `fakeredis`
+# raises "unknown command 'evalsha'" on every request, since
+# GlobalRateLimitMiddleware runs on every route including TestClient calls.
+# Confirmed directly: installing bare fakeredis==2.37.1 (no [lua]/lupa) fails
+# 69 of the fast suite's 131 tests this way. Both pinned exact, like
+# everything else in this file.
+fakeredis[lua]==2.37.1
+lupa==2.8
+
 # Dev tools. flake8 is also CI's backend-lint gate (blocking) - pinned exact,
 # like everything else in this file, so a new major release can't silently
 # change which rules fire and break the gate on an unrelated push.

@@ -57,7 +57,19 @@ TOKEN_HOURS = int(os.environ.get("TOKEN_HOURS", "8"))
 # even though JWT_SECRET stays fixed across restarts. Set SERVER_BOOT_ID in the
 # environment (e.g. to a fixed value, or a deploy hash) if you instead want
 # sessions to survive restarts within the same deployment.
-SERVER_BOOT_ID = os.environ.get("SERVER_BOOT_ID") or secrets.token_urlsafe(16)
+#
+# Required (not just "strongly recommended") in production: with more than
+# one replica, each process generating its own random value here would mean
+# a token issued by replica A gets rejected by replica B (see
+# SCALABILITY_AUDIT.md finding F3) - every user would see random 401s
+# depending on which replica a load balancer happened to route them to. All
+# replicas in a deployment must read the same explicit value from a shared
+# .env.production/secret store.
+_server_boot_id_env = os.environ.get("SERVER_BOOT_ID")
+if _is_production and not _server_boot_id_env:
+    log.error("SERVER_BOOT_ID not set while running in production; refusing to start")
+    raise RuntimeError("Missing SERVER_BOOT_ID in production environment")
+SERVER_BOOT_ID = _server_boot_id_env or secrets.token_urlsafe(16)
 
 bearer = HTTPBearer(auto_error=False)
 

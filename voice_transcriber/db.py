@@ -9,8 +9,10 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
+import psycopg
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -32,7 +34,7 @@ def _get_pool() -> ConnectionPool:
         _pool = ConnectionPool(
             app_config.DATABASE_URL,
             min_size=1,
-            max_size=10,
+            max_size=app_config.DB_POOL_MAX_SIZE,
             kwargs={"row_factory": dict_row},
             open=True,
         )
@@ -48,10 +50,62 @@ def close_pool():
 
 
 def init():
-    """Apply all pending Alembic migrations. Idempotent - safe to call on
-    every startup, including against an already-up-to-date database."""
+    """Apply all pending Alembic migrations. Idempotent - safe to call
+    against an already-up-to-date database.
+
+    NOT called automatically at app startup (see server.py) - with more
+    than one replica, concurrent, uncoordinated `alembic upgrade head` calls
+    against the same database could race (see SCALABILITY_AUDIT.md finding
+    F4). Migrations are instead an explicit deploy-time step (a one-shot
+    `migrate` Compose service - see docker-compose.prod.yml) that runs to
+    completion before any `web` replica starts; server.py's startup hook
+    only verifies the schema is already at the expected head
+    (verify_schema_current(), below) and refuses to serve otherwise. Test
+    fixtures (conftest.py's isolated_db/live_server) still call this
+    directly, which is fine - each test's own private schema is never
+    touched by more than one process at a time.
+    """
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
     command.upgrade(cfg, "head")
+
+
+def get_head_revision() -> str:
+    """The migration revision the current codebase expects the DB to be
+    at - read from the alembic/versions/ files on disk, not the database."""
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    return ScriptDirectory.from_config(cfg).get_current_head()
+
+
+def get_current_revision() -> Optional[str]:
+    """The migration revision the database actually reports, or None if
+    the alembic_version table doesn't exist yet (a never-migrated
+    database)."""
+    with _get_pool().connection() as conn:
+        try:
+            row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        except psycopg.errors.UndefinedTable:
+            conn.rollback()
+            return None
+        return row["version_num"] if row else None
+
+
+def verify_schema_current():
+    """Read-only startup check, replacing the old auto-migrate-on-boot
+    behavior (see init()'s docstring). Raises RuntimeError if the database
+    isn't at the exact revision this codebase expects - a mismatch means
+    someone forgot to run the migrate step before starting this replica, or
+    a rolling deploy is (incorrectly) running old and new code against a
+    schema only one of them matches. Fails loud and fast rather than
+    silently serving requests against the wrong schema."""
+    head = get_head_revision()
+    current = get_current_revision()
+    if current != head:
+        raise RuntimeError(
+            f"Database schema is not at the expected revision "
+            f"(found {current!r}, expected {head!r}). Run migrations "
+            f"explicitly before starting this app - see DEPLOYMENT.md's "
+            f"migration runbook."
+        )
 
 
 def ping():

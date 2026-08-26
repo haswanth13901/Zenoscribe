@@ -43,6 +43,9 @@ Prerequisites
 - Git
 - A modern browser (Chrome/Edge/Firefox)
 - Postgres (local install, or via `docker compose up db`)
+- Redis (local install, or via `docker compose up redis`) — required, not
+  optional: rate limiting has no in-memory fallback any more (see
+  "Data & storage" below)
 
 1) Install dependencies
 
@@ -74,6 +77,10 @@ SONIOX_API_KEY=
 # JWT signing secret. Required in production; a generated secret is allowed
 # in development/testing but should not be used in deployed environments.
 JWT_SECRET=
+
+# Redis connection string - required (rate limiting has no in-memory
+# fallback). Defaults to the `redis` service in docker-compose.yml.
+REDIS_URL=redis://localhost:6379/0
 
 # Initial admin account (set a strong password in production)
 ADMIN_USERNAME=admin
@@ -129,16 +136,19 @@ development and in any deployed environment. When enabled, calls to
 `X-TEST-HOOK-SECRET` header and an admin JWT, and are accepted only from
 localhost unless `RESTRICT_TEST_HOOK_TO_LOCALHOST=false`.
 
-2b) Start Postgres
+2b) Start Postgres and Redis, then run migrations
 
 ```bash
-docker compose up -d db
+docker compose up -d db redis
+python -c "from voice_transcriber import db; db.init()"
 ```
 
-Or point `DATABASE_URL` in `.env` at a Postgres instance you already have
-running. The app applies Alembic migrations automatically on startup (see
-"Data & storage" below), so no separate migration step is needed for a fresh
-database.
+Or point `DATABASE_URL`/`REDIS_URL` in `.env` at instances you already have
+running. Migrations no longer apply automatically on app startup (see
+"Data & storage" below) — this is now an explicit one-time step for a fresh
+database (`docker compose up` runs it for you automatically via the
+`migrate` service; running it directly like above is only needed if you're
+running `uvicorn` outside Compose).
 
 3) Start the app (development)
 
@@ -170,6 +180,18 @@ proxies `/api`, `/healthz`, `/ws`, `/ws/translate`, and the two vanilla
 pages (`/` and `/login`) through to the backend on `:3000`, so the browser
 sees one effective origin. See "Frontend" below for how this split works
 and when you'd use it over the single-port option above.
+
+**Fully containerized, with hot-reload** (no host-side `npm`/`uvicorn` at
+all - same split as above, just each half in its own container instead of
+its own terminal):
+
+```bash
+docker compose up -d
+```
+
+Open http://localhost:8000, same as the two-terminal option. `db`, `redis`,
+`migrate`, `web`, and `frontend` all come up together - see "Frontend"
+below for what `frontend`'s container does and why it needs `WATCH_POLL`.
 
 Either way, the first-run admin user will be created automatically if no
 admin exists; in development a generated password may be used (the app
@@ -244,9 +266,12 @@ ENV=production uvicorn voice_transcriber.server:app --host 0.0.0.0 --port 8000 -
 
 Docker Compose (recommended — this is what `docker-compose.prod.yml` and
 `frontend/nginx.conf` in this repo are set up for; single VM behind nginx
-for TLS, certificate managed by a certbot sidecar). Four containers, three
-separately-built/pulled images — `db` (stock `postgres:16-alpine`), `web`
-(backend only — API/WS routes, nothing else), `nginx` (TLS termination,
+for TLS, certificate managed by a certbot sidecar). Seven services: `db`
+(stock `postgres:16-alpine`), `redis` (stock `redis:7-alpine` — shared
+rate-limit counters), `minio` (stock `minio/minio` — shared recording
+storage), `migrate` (one-shot: applies Alembic migrations, then exits),
+`web` (backend only — API/WS routes, nothing else; stateless, safe to run
+multiple replicas of — see "Scaling" below), `nginx` (TLS termination,
 routing to `web`, and the SPA/login page, all in one container — see
 `frontend/nginx.conf`), and `certbot` (obtains/renews the Let's Encrypt
 certificate `nginx` serves):
@@ -269,42 +294,64 @@ Docker (single combined container, no Compose — example). A bare `docker
 build .` now produces the lean backend-only image (the Dockerfile's default
 target), so this path needs `--target backend-with-frontend` explicitly —
 the same combined backend+frontend image `docker-compose.yml` (dev) uses,
-frontend/dist/ baked in and all:
+frontend/dist/ baked in and all. `STORAGE_BACKEND` must be `minio` in
+production (the app refuses to start with `local`, which isn't shared
+across anything) — you need real Postgres/Redis/MinIO endpoints reachable
+from this container, set via `DATABASE_URL`/`REDIS_URL`/`MINIO_*` in
+`.env.production`, since there's no Compose network to resolve service
+names on in this path:
 
 ```bash
 docker build --target backend-with-frontend -t zenoscribe .
-docker run -p 8000:8000 -e ENV=production --env-file .env.production \
-  -v zenoscribe-recordings:/app/voice_transcriber/recordings \
-  zenoscribe
+docker run -p 8000:8000 -e ENV=production --env-file .env.production zenoscribe
 ```
 
-The `-v zenoscribe-recordings:...` mount is required — without it, recording
-audio/transcripts live only inside the container's writable layer and are
-lost the moment the container is removed or redeployed (a plain restart is
-fine; `docker rm`/replacing the container is not). `zenoscribe-recordings`
-is a named Docker volume: Docker creates and persists it on the host the
-first time it's used, and every future `docker run` with the same volume
-name reattaches to the same data, so recordings survive redeploys as long
-as this stays a single container on this host. You are also on your own for
-TLS termination in this path — the Compose path above gets it from nginx
-(certificate managed by the `certbot` sidecar).
+No recordings volume is needed here any more — once `STORAGE_BACKEND=minio`,
+the only thing the container ever writes locally is an ephemeral
+live-session scratch file, gone the moment that session ends (see
+`config.live_scratch_dir()`); the durable data lives in MinIO/Postgres, both
+external to this container. You are on your own for TLS termination in this
+path — the Compose path above gets it from nginx (certificate managed by the
+`certbot` sidecar).
 
-Either way, this assumes a single VM. It does not extend to running
-multiple instances of the app at once (e.g. behind a load balancer for
-scale) — each instance would have its own local volume, so a recording
-saved by one instance wouldn't be visible from another, and each instance's
-own random `SERVER_BOOT_ID` would randomly log out users routed to a
-different instance. That needs S3-compatible object storage and a shared
-`SERVER_BOOT_ID` at minimum, neither implemented yet (see `E2E_Review.md`).
+Either way, this assumes a single VM for `db`/`redis`/`minio` themselves -
+none of those three have been made highly available, only `web` is
+horizontally scalable. See DEPLOYMENT.md's "If you scale beyond one VM"
+section for what that does and doesn't cover.
 
 Both the backend and the combined single-container image run as a non-root
 user (`USER app` in the Dockerfile) with `--workers 1` pinned explicitly —
-see the Dockerfile's comments for why raising worker count is unsafe
-without further changes.
+see the Dockerfile's comments for why raising worker count per container is
+unsafe without further changes; scale by running more containers instead
+(see "Scaling" below).
+
+**Scaling `web` to multiple replicas** (plain Docker Compose, no
+Kubernetes/Swarm needed):
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml \
+  up -d --scale web=3
+```
+
+This works because `web` is stateless: recordings go through the shared
+`minio` service, rate limits through the shared `redis` service, and every
+replica validates the same required `SERVER_BOOT_ID`.
+`frontend/nginx.conf`'s `resolver`/`$backend` directives are what make nginx
+actually spread requests across the replicas Docker's DNS returns, instead
+of pinning to whichever one it resolved first. See DEPLOYMENT.md's
+"Scaling" section for `DB_POOL_MAX_SIZE` sizing guidance as you add
+replicas, and `HORIZONTAL_SCALABILITY_READINESS.md` for this work's
+verification status — **run its multi-replica validation on your own VM
+before relying on this in production**; `docker-compose.prod.yml`
+specifically has not been run in this repo's own tool environment (Docker
+itself is available and `docker-compose.yml`'s dev stack has been run on it
+end to end, but not this file).
 
 Note: `docker-compose.yml` in this repo is for local development only (it
-bind-mounts backend source for live-edit, defaults to `.env`, and builds the
-combined `backend-with-frontend` target) — don't use it for production; use
+bind-mounts source for live-edit, defaults to `.env`, and runs `web` and
+`frontend` as separate containers, with `web` also baking in a
+`backend-with-frontend` build for the vanilla `/`/`/login` pages — see
+"Frontend" above) — don't use it for production; use
 `docker-compose.prod.yml` instead.
 
 Health check: `GET /healthz` reports liveness plus a Postgres readiness
@@ -354,7 +401,9 @@ For full developer reference see the Project structure section below.
 
 These commands help verify a fresh developer environment is correctly configured.
 
-1) Bootstrap (create venv, install deps, Playwright browsers):
+1) Bootstrap (create venv, install deps, Playwright browsers; also starts
+   `db`/`redis` via Docker if available and verifies both are reachable —
+   see `scripts/check_deps.py`):
 
 ```bash
 # POSIX
@@ -364,7 +413,11 @@ bash scripts/bootstrap.sh
 powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
 ```
 
-2) Activate the virtualenv and run a quick smoke check:
+2) Activate the virtualenv and run a quick smoke check. Needs a real
+   Postgres and Redis reachable (`docker compose up -d db redis`, or your
+   own instances via `DATABASE_URL`/`REDIS_URL`), and the DB migrated once
+   (`python -c "from voice_transcriber import db; db.init()"` — see "Data &
+   storage" below for why this is a separate step now):
 
 ```bash
 # POSIX
@@ -373,17 +426,21 @@ python -m uvicorn voice_transcriber.server:app --port 8000
 # then open http://localhost:8000
 ```
 
-3) Run the test suite (Playwright must be installed for the E2E test):
+3) Run the test suite (Playwright must be installed for the E2E test). The
+   fast suite (`pytest -q`) needs no real Redis - it uses an in-process
+   fakeredis stand-in (see conftest.py's `isolated_redis` fixture) - but the
+   integration suite below launches a real server subprocess and does need
+   a real Redis reachable at `REDIS_URL`/its default:
 
 ```bash
 # Lint: matches CI's backend-lint job exactly
 flake8 voice_transcriber scripts --max-line-length=120
 
-# Fast suite: isolated unit/API tests (no live server, no network, <10s)
+# Fast suite: isolated unit/API tests (no live server, no network, ~90s)
 pytest -q
 
 # Full black-box E2E test: launches a real server subprocess + headless
-# Chromium via Playwright
+# Chromium via Playwright (needs a real Redis - see above)
 pytest -q -m integration
 
 # Real Soniox network tests. The network-timeout test always runs; the
@@ -559,12 +616,31 @@ production (which stays single-origin behind nginx, unaffected by any of
 this).
 
 This dev split only affects local development — `docker-compose.yml`'s
-`web` service now defaults to `:3000` to match (paired with running `npm
---prefix frontend run dev` on the host at `:8000`), while
+`web` service defaults to `:3000` to match, paired with either running `npm
+--prefix frontend run dev` on the host at `:8000` (above), or the
+containerized equivalent: `docker-compose.yml`'s own `frontend` service
+(`frontend/Dockerfile`'s `dev` target), which runs the same Vite dev server
+in its own container - `docker compose up -d` brings up `db`, `redis`,
+`migrate`, `web`, and `frontend` together, no host-side `npm`/`uvicorn`
+needed at all. `frontend/` is bind-mounted for live-reload; a separate
+anonymous volume keeps `node_modules` from being shadowed by that mount
+(esbuild/Rollup ship platform-specific native binaries, so the container's
+own Linux `npm ci` has to win, not whatever - or nothing - is on the host).
+Editing on a host path that's bind-mounted into a container can miss native
+file-change events depending on your OS/Docker Desktop version, so this
+service sets `WATCH_POLL=1` (see `vite.config.ts`) to poll for changes
+instead - the bare-host workflow above doesn't need this and keeps
+instant, zero-CPU-cost native events.
+
 `docker-compose.prod.yml` and the Dockerfile are unchanged: production
 still builds `frontend/dist/` once, but serves it from the separate
-`nginx` container (not the backend process) — see the "Production" section
-above.
+`nginx` container (not the backend process), never a Vite dev server - see
+the "Production" section above. `web` (dev) still also bakes `frontend/dist/`
+into its own image (`backend-with-frontend` target) alongside `frontend`'s
+hot-reload container - a narrower, distinct need: `/` and `/login` are
+proxied to `web`, which serves them from a physical `frontend/dist/login.html`
+(a backend-owned vanilla page, not part of the React app `frontend`
+hot-reloads) - see that target's own comment in the Dockerfile.
 
 Frontend tests:
 
@@ -679,31 +755,55 @@ All in `config.py`:
 - **Postgres** — users, recording metadata, presence. Connection configured via
   `DATABASE_URL` (see `.env.example`); for local dev this points at the `db`
   service in `docker-compose.yml`. Schema is managed with
-  [Alembic](https://alembic.sqlalchemy.org/) migrations in `alembic/versions/`;
-  `db.init()` runs `alembic upgrade head` automatically at startup, so a fresh
-  database is migrated on first run same as before. To manage migrations
-  directly: `alembic upgrade head`, `alembic revision -m "..."`.
-- **`recordings/`** — saved `.wav`/`.mp3` and `.txt` files. Deliberately *not*
-  served as static files; all access goes through authenticated,
-  ownership-checked API routes.
+  [Alembic](https://alembic.sqlalchemy.org/) migrations in `alembic/versions/`.
+  **Migrations no longer apply automatically at app startup** (this changed
+  once running more than one `web` replica became supported - concurrent,
+  uncoordinated `alembic upgrade head` calls from several replicas starting
+  at once could race). `db.init()` still runs them (idempotent, safe to call
+  against an already-current database), but it's now an explicit step -
+  `docker compose up` runs it for you via the one-shot `migrate` service; the
+  app's own startup only *verifies* the schema matches what the code expects
+  (`db.verify_schema_current()`) and refuses to serve otherwise. To manage
+  migrations directly: `alembic upgrade head`, `alembic revision -m "..."`.
+- **Redis** — rate-limit counters only (`rate_limit.py`), never durable data.
+  Connection configured via `REDIS_URL` (see `.env.example`); for local dev
+  this points at the `redis` service in `docker-compose.yml`. Losing Redis
+  (restart, outage) never loses data - rate limiting fails closed (503) until
+  it's back, rather than silently allowing unlimited requests through.
+- **Recording storage** (`voice_transcriber/storage/`) — audio + transcript
+  objects, addressed by an opaque key (`users/{user_id}/recordings/{id}.wav`
+  etc.), never a raw filesystem path. Two backends:
+  - `STORAGE_BACKEND=local` (dev/test default) — writes under
+    `voice_transcriber/recordings/`, matching the key layout above.
+  - `STORAGE_BACKEND=minio` (required in production) — a self-hosted
+    S3-compatible object store, shared across every `web` replica (unlike a
+    local directory, which only one replica could ever see). See
+    `docker-compose.yml`'s opt-in `minio` service for local testing against a
+    real MinIO instance, and `SCALABILITY_DESIGN.md` §2 for the full design.
+  Neither backend is ever served as static files; all access goes through
+  authenticated, ownership-checked API routes (`_authorize_recording()` in
+  `routes_api.py`), regardless of which backend answers the read.
 - **`recordings.source`** — one of `transcribe` / `translate` / `upload`
   (`db.RECORDING_SOURCES`), recording which flow produced the row: a live
   transcription session, a live translate session, or a batch upload via
   `/api/transcribe` or `/api/transcribe/translate`. `GET /api/recordings`
   accepts an optional `source` filter alongside `user_id`/`date_from`/`date_to`.
 
-`recordings/` is not committed to git (see `.gitignore`); neither is `.env`
-(which holds `DATABASE_URL` and other secrets).
+`voice_transcriber/recordings/` is not committed to git (see `.gitignore`);
+neither is `.env` (which holds `DATABASE_URL`/`REDIS_URL` and other secrets).
 
-If `recordings/` and the `recordings` table ever drift out of sync (e.g. a
-partial failure mid-save), `scripts/reconcile_recordings.py` reports files on
-disk with no matching DB row and DB rows pointing at missing files. It's a
-dry-run report by default; pass `--delete` to also remove orphaned files (it
-never touches the database):
+If stored recordings and the `recordings` table ever drift out of sync (e.g.
+a partial failure mid-save, or a MinIO hiccup - the storage-upload steps in
+transcribe.py/translate.py/routes_api.py are deliberately best-effort so a
+storage blip doesn't turn an otherwise-successful session into an error),
+`scripts/reconcile_recordings.py` reports stored objects with no matching DB
+row and DB rows pointing at missing objects. Works against either storage
+backend. It's a dry-run report by default; pass `--delete` to also remove
+orphaned objects (it never touches the database):
 
 ```bash
 python scripts/reconcile_recordings.py            # report only
-python scripts/reconcile_recordings.py --delete   # also delete orphan files
+python scripts/reconcile_recordings.py --delete   # also delete orphan objects
 ```
 
 ## Security notes
@@ -746,15 +846,20 @@ python scripts/reconcile_recordings.py --delete   # also delete orphan files
   `JWT_SECRET` is always used — but that alone does *not* mean deploys/restarts
   leave real users logged in. A separate mechanism does log everyone out on
   every restart by default: see `SERVER_BOOT_ID` below.
-- **`SERVER_BOOT_ID` — restarts log every user out unless you set this.**
-  Independently of `JWT_SECRET`, every issued token is stamped with the boot
-  ID of the server process that issued it (`auth.py`), and a token whose
-  `boot` doesn't match the *currently running* process is rejected. Left
-  unset, a fresh random boot ID is generated on every process start — so a
-  plain `docker compose restart`, a crash loop, or a host reboot logs out
-  every user even though `JWT_SECRET` never changed. Set `SERVER_BOOT_ID` to
-  a fixed value in `.env.production` (see `.env.production.example`) if you
-  want sessions to survive ordinary restarts within the same deployment.
+- **`SERVER_BOOT_ID` — required in production.** Independently of
+  `JWT_SECRET`, every issued token is stamped with the boot ID of the server
+  process that issued it (`auth.py`), and a token whose `boot` doesn't match
+  the *currently running* process is rejected. In development, leaving it
+  unset generates a fresh random boot ID per process start — so a plain
+  `docker compose restart`, a crash loop, or a host reboot logs out every
+  user even though `JWT_SECRET` never changed. In production the app now
+  refuses to start without an explicit value: with more than one `web`
+  replica, each generating its own random value would mean a token issued by
+  one replica gets rejected by another (random 401s depending on which
+  replica a load balancer routes a request to) - see
+  `SCALABILITY_AUDIT.md` finding F3. Set `SERVER_BOOT_ID` to a fixed value
+  in `.env.production` (see `.env.production.example`), the same value read
+  by every replica, so restarts (and now, replicas) don't log anyone out.
   There is no way to revoke a single session early either way — see
   DEPLOYMENT.md's limitations section.
 

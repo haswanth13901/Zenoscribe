@@ -15,6 +15,20 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+# ---- Stage: dev - Vite dev server with hot reload, used only by
+# docker-compose.yml's `frontend` service (local Docker dev parity, the
+# containerized equivalent of README's "two-terminal" workflow's `npm
+# --prefix frontend run dev`). Not used by production or by Stage 2 below -
+# entirely independent of the `build` stage above, since dev serves
+# frontend/src/ live rather than a compiled dist/. ----
+FROM node:20-slim AS dev
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+EXPOSE 8000
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
 # ---- Stage 2: serve it ----
 FROM nginx:1.27-alpine
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from voice_transcriber import config, db, translate
+from voice_transcriber import config, db, storage, translate
 
 STARTED_AT = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
 
@@ -49,7 +49,7 @@ async def test_save_translate_session_writes_wav_txt_and_db_row(
 
     await translate._save_translate_session(session, ws_user, wav_path, STARTED_AT, turns)
 
-    txt_path = config.RECORDINGS / f"{session}.txt"
+    txt_path = config.RECORDINGS / storage.recording_key(ws_user["id"], session, ".txt")
     assert txt_path.exists()
     text = txt_path.read_text(encoding="utf-8")
     assert "Hola" in text and "Hello" in text
@@ -75,7 +75,7 @@ async def test_db_failure_still_writes_transcript_and_logs_distinctly(
     with caplog.at_level(logging.ERROR, logger="translate"):
         await translate._save_translate_session(session, ws_user, wav_path, STARTED_AT, turns)
 
-    txt_path = config.RECORDINGS / f"{session}.txt"
+    txt_path = config.RECORDINGS / storage.recording_key(ws_user["id"], session, ".txt")
     assert txt_path.exists()
     assert "Hola" in txt_path.read_text(encoding="utf-8")
     assert db.get_recording(session) is None

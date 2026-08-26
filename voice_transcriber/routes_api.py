@@ -11,16 +11,17 @@ import functools
 import logging
 import mimetypes
 import os
-import shutil
+import re
 import tempfile
 import uuid
 import wave
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 try:
@@ -29,16 +30,30 @@ try:
     from . import db
     from . import rate_limit
     from . import soniox_client as sx
+    from . import storage
 except ImportError:  # run flat from inside the package dir
     import auth
     import config
     import db
     import rate_limit
     import soniox_client as sx
+    import storage
 
 log = logging.getLogger("api")
 
 router = APIRouter()
+
+# A username becomes part of every recording's storage key/scratch filename
+# for that user (session names in transcribe.py/translate.py/
+# _persist_upload_recording embed it directly). Restricting it to a safe
+# charset closes off path-traversal via a crafted username (e.g.
+# "../../etc") reaching storage.recording_key() -> a local-backend
+# filesystem path - found and fixed during this pass's storage-abstraction
+# security review, not previously exploitable-by-a-non-admin since only
+# admins can set a username, but worth closing regardless (see
+# recording_key()'s own defensive check in storage/base.py for the second
+# layer of protection).
+USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # sx.transcribe_file blocks a thread for up to the Soniox transcription
 # timeout (minutes, for a long file). asyncio.to_thread would run it on the
@@ -155,6 +170,12 @@ async def admin_create_user(
             status.HTTP_400_BAD_REQUEST,
             f"Username required and password must be at least {auth.MIN_PASSWORD_LENGTH} characters",
         )
+    if not USERNAME_RE.match(body.username.strip()) or ".." in body.username:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Username may only contain letters, numbers, '.', '_', and '-' "
+            "(and no repeated '.')",
+        )
     if body.role not in ("user", "admin"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role")
     if await asyncio.to_thread(db.get_user_by_username, body.username):
@@ -242,12 +263,12 @@ async def admin_delete_user(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Cannot delete the last admin"
         )
-    for wav_name, txt_name in files:
-        for name in (wav_name, txt_name):
+    for wav_key, txt_key in files:
+        for key in (wav_key, txt_key):
             try:
-                (config.RECORDINGS / name).unlink(missing_ok=True)
-            except OSError:
-                log.warning("could not remove %s", name)
+                await asyncio.to_thread(storage.get_storage().delete, key)
+            except Exception:
+                log.warning("could not remove %s", key)
     return {"ok": True, "removed_recordings": len(files)}
 
 
@@ -346,10 +367,18 @@ async def get_transcript(
     _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
 ):
     row = await _authorize_recording(rec_id, user)
-    path = config.RECORDINGS / row["txt_file"]
-    if not path.exists():
+    try:
+        text = await asyncio.to_thread(storage.get_storage().get_text, row["txt_file"])
+    except storage.StorageNotFound:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Transcript missing")
-    return {"id": rec_id, "text": path.read_text(encoding="utf-8")}
+    except Exception:
+        # Distinct from "missing" above: the object may well exist, but the
+        # storage backend itself (MinIO/disk) couldn't be reached right now
+        # - a 503 tells the client "try again shortly," not "this recording
+        # doesn't exist," which a 404 here would incorrectly imply.
+        log.exception("storage backend error reading transcript %s", row["txt_file"])
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Storage temporarily unavailable")
+    return {"id": rec_id, "text": text}
 
 
 @router.get("/api/recordings/{rec_id}/audio")
@@ -359,15 +388,38 @@ async def get_audio(
     _rl=Depends(rate_limit.per_user(120, 60, "recordings")),
 ):
     row = await _authorize_recording(rec_id, user)
-    path = config.RECORDINGS / row["wav_file"]
-    if not path.exists():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Audio missing")
     # Recordings from the batch-upload flow keep their original extension
     # (mp3, etc), unlike live sessions which are always .wav - guess the
     # content type instead of assuming .wav for everything.
-    media_type = mimetypes.guess_type(path.name)[0] or "audio/wav"
-    return FileResponse(
-        path, media_type=media_type, filename=f"{rec_id}{path.suffix}"
+    suffix = os.path.splitext(row["wav_file"])[1] or ".wav"
+    media_type = mimetypes.guess_type(row["wav_file"])[0] or "audio/wav"
+    try:
+        stream = await asyncio.to_thread(storage.get_storage().open_stream, row["wav_file"])
+    except storage.StorageNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Audio missing")
+    except Exception:
+        # See get_transcript's identical distinction above: "backend
+        # unreachable" (503, try again) is not "object doesn't exist" (404).
+        log.exception("storage backend error reading audio %s", row["wav_file"])
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Storage temporarily unavailable")
+
+    def _iter_and_close():
+        # Starlette runs a sync generator in a threadpool automatically
+        # (see StreamingResponse), so stream.read()'s blocking I/O here
+        # doesn't stall the event loop.
+        try:
+            while True:
+                chunk = stream.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            stream.close()
+
+    return StreamingResponse(
+        _iter_and_close(),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{rec_id}{suffix}"'},
     )
 
 
@@ -380,31 +432,35 @@ async def remove_recording(
     await _authorize_recording(rec_id, user)
     files = await asyncio.to_thread(db.delete_recording, rec_id)
     if files:
-        for name in files:
+        for key in files:
             try:
-                (config.RECORDINGS / name).unlink(missing_ok=True)
-            except OSError:
-                log.warning("could not remove %s", name)
+                await asyncio.to_thread(storage.get_storage().delete, key)
+            except Exception:
+                log.warning("could not remove %s", key)
     return {"ok": True}
 
 
 def _persist_upload_recording(user, tmp_path, suffix, turns) -> bool:
-    """Move a successfully-transcribed upload into permanent storage and
-    register it as a recording, mirroring how transcribe.py/translate.py
-    persist their live sessions - the batch-upload flow previously
-    discarded both the audio and the transcript once the response was
-    sent, so nothing showed up in My/All Recordings.
+    """Upload a successfully-transcribed upload into storage and register it
+    as a recording, mirroring how transcribe.py/translate.py persist their
+    live sessions - the batch-upload flow previously discarded both the
+    audio and the transcript once the response was sent, so nothing showed
+    up in My/All Recordings.
 
     Best-effort: storage/DB failures are logged, not raised, so a hiccup
     here doesn't turn an otherwise-successful transcription into a 500 for
-    the caller. Returns True if the temp file was moved (so the caller
-    shouldn't also try to unlink it), False if nothing was persisted (empty
-    result, or the move itself failed) and the caller's own cleanup should
-    run instead.
+    the caller. Returns True if the temp file was consumed by a successful
+    upload (so the caller shouldn't also try to unlink it), False if
+    nothing was persisted (empty result, or the upload itself failed) and
+    the caller's own cleanup should run instead. Duration is read from
+    tmp_path *before* uploading it - storage.upload() consumes (deletes)
+    the local copy on success.
 
     Turns may or may not carry a "translation" key (present only for
     /transcribe/translate) - the transcript and preview include it when
-    present, matching translate.py's live-session format.
+    present, matching translate.py's live-session format. Runs on a worker
+    thread (see _transcribe_file_bounded's caller), so storage calls here
+    are made directly, not via asyncio.to_thread.
     """
     if not turns:
         return False
@@ -412,13 +468,22 @@ def _persist_upload_recording(user, tmp_path, suffix, turns) -> bool:
     started_at = datetime.now()
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
     session = f"{stamp}-{user['username']}-upload-{uuid.uuid4().hex[:6]}"
-    audio_path = config.RECORDINGS / f"{session}{suffix}"
-    txt_path = config.RECORDINGS / f"{session}.txt"
+    wav_key = storage.recording_key(user["id"], session, suffix)
+    txt_key = storage.recording_key(user["id"], session, ".txt")
 
+    duration = 0.0
+    if suffix.lower() == ".wav":
+        try:
+            with wave.open(tmp_path, "rb") as wf:
+                duration = wf.getnframes() / float(wf.getframerate() or 1)
+        except (wave.Error, OSError):
+            log.exception("could not read wav duration %s", tmp_path)
+
+    content_type = mimetypes.guess_type(f"f{suffix}")[0] or "application/octet-stream"
     try:
-        shutil.move(tmp_path, audio_path)
-    except OSError:
-        log.exception("could not store uploaded audio %s", audio_path)
+        storage.get_storage().upload(wav_key, Path(tmp_path), content_type)
+    except Exception:
+        log.exception("could not store uploaded audio %s", wav_key)
         return False
 
     lines = []
@@ -430,22 +495,14 @@ def _persist_upload_recording(user, tmp_path, suffix, turns) -> bool:
             line += f"\n    -> {t['translation']}"
         lines.append(line)
     try:
-        txt_path.write_text("\n".join(lines), encoding="utf-8")
-    except OSError:
-        log.exception("could not write upload transcript %s", txt_path)
-
-    duration = 0.0
-    if suffix.lower() == ".wav":
-        try:
-            with wave.open(str(audio_path), "rb") as wf:
-                duration = wf.getnframes() / float(wf.getframerate() or 1)
-        except (wave.Error, OSError):
-            log.exception("could not read wav duration %s", audio_path)
+        storage.get_storage().upload_text(txt_key, "\n".join(lines))
+    except Exception:
+        log.exception("could not write upload transcript %s", txt_key)
 
     preview = " ".join(t.get("translation") or t.get("text", "") for t in turns)[:160]
     try:
         db.add_recording(
-            session, user["id"], audio_path.name, txt_path.name,
+            session, user["id"], wav_key, txt_key,
             started_at.isoformat(), duration, len(turns), preview, "upload",
         )
     except Exception:

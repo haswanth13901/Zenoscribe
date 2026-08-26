@@ -47,7 +47,7 @@ def test_persist_writes_audio_txt_and_db_row(isolated_db, isolated_recordings, u
 
     assert moved is True
     assert not tmp_path.exists()  # moved, not copied
-    audio_files = list(isolated_recordings.glob("*.wav"))
+    audio_files = list(isolated_recordings.glob("**/*.wav"))
     assert len(audio_files) == 1
 
     rows = db.list_recordings(user_id=upload_user["id"])
@@ -116,7 +116,7 @@ def test_db_failure_still_moves_audio_and_writes_transcript(
 
     assert moved is True
     assert not tmp_path.exists()
-    assert list(isolated_recordings.glob("*.txt"))
+    assert list(isolated_recordings.glob("**/*.txt"))
     assert db.list_recordings(user_id=upload_user["id"]) == []
     assert any("could not register upload recording" in r.message for r in caplog.records)
 

@@ -31,13 +31,34 @@ PRODUCTION = ENV == 'production'
 RECORDINGS = BASE_DIR / "recordings"
 RECORDINGS.mkdir(exist_ok=True)
 
+
+def live_scratch_dir() -> Path:
+    """Scratch directory for a live session's WAV file while it's still
+    being recorded (see transcribe.py/translate.py) - not a final
+    destination. `wave` needs a real seekable file handle for incremental
+    writes regardless of storage backend, so a live session always buffers
+    locally first; the finished file is then handed to storage.upload() and
+    removed from here. Resolved fresh against RECORDINGS on every call
+    (never cached) so tests that monkeypatch config.RECORDINGS (see
+    conftest.py's isolated_recordings fixture) get an isolated scratch dir
+    too. The "_live" prefix can never collide with a real object key (those
+    are always "users/...", see storage/base.py's recording_key())."""
+    d = RECORDINGS / "_live"
+    d.mkdir(exist_ok=True)
+    return d
+
+
 # Postgres connection string, e.g. postgresql://user:pass@host:port/dbname.
-# Production requires an explicit value; the dev default below matches the
-# `db` service in docker-compose.yml and must never be used in production.
-_database_url_env = os.environ.get('DATABASE_URL')
-if PRODUCTION and not _database_url_env:
-    raise RuntimeError("Missing DATABASE_URL in production environment")
-DATABASE_URL = _database_url_env or 'postgresql://zenoscribe:zenoscribe@localhost:5432/zenoscribe'
+# Required in every mode - no hardcoded fallback. .env/.env.example set it
+# explicitly for dev, .env.production.example for production, and CI sets
+# it directly as a job env var (ci.yml) - there's no longer a scenario
+# where this needs a value baked into source.
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if not DATABASE_URL:
+    raise RuntimeError(
+        "Missing DATABASE_URL - set it in .env (dev) or .env.production "
+        "(production); see .env.example"
+    )
 
 # Soniox API key. A missing/typo'd key still boots cleanly and passes a
 # health check if this isn't checked here - it only surfaces as an uncaught
@@ -45,6 +66,42 @@ DATABASE_URL = _database_url_env or 'postgresql://zenoscribe:zenoscribe@localhos
 # record, which looks like a generic 500 with no clue what's wrong.
 if PRODUCTION and not os.environ.get('SONIOX_API_KEY'):
     raise RuntimeError("Missing SONIOX_API_KEY in production environment")
+
+# Recording storage backend. 'local' (default) writes into RECORDINGS above -
+# fine for a single container, but a second replica can't see another
+# replica's files (see SCALABILITY_AUDIT.md finding F1). Production must use
+# 'minio' instead, backed by a shared, self-hosted S3-compatible store -
+# every replica then reads/writes the same objects regardless of which one
+# handled the request. See voice_transcriber/storage/ for the abstraction.
+STORAGE_BACKEND = os.environ.get('STORAGE_BACKEND', 'local').lower()
+if PRODUCTION and STORAGE_BACKEND != 'minio':
+    raise RuntimeError(
+        "STORAGE_BACKEND must be 'minio' in production - 'local' storage is "
+        "not shared across replicas and recordings would become invisible/"
+        "lost depending on which replica handles a given request"
+    )
+MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', 'localhost:9000')
+MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
+MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
+MINIO_BUCKET = os.environ.get('MINIO_BUCKET', 'zenoscribe-recordings')
+MINIO_SECURE = os.environ.get('MINIO_SECURE', 'false').lower() in ('1', 'true', 'yes')
+if PRODUCTION and STORAGE_BACKEND == 'minio' and not (MINIO_ACCESS_KEY and MINIO_SECRET_KEY):
+    raise RuntimeError("Missing MINIO_ACCESS_KEY/MINIO_SECRET_KEY in production environment")
+
+# Redis: shared rate-limit counters only, never durable business data (see
+# SCALABILITY_DESIGN.md §3). Required in production because rate_limit.py's
+# in-memory counters (the old default) don't stay accurate once more than
+# one replica is handling traffic - see SCALABILITY_AUDIT.md finding F2.
+REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+if PRODUCTION and not os.environ.get('REDIS_URL'):
+    raise RuntimeError("Missing REDIS_URL in production environment")
+
+# Postgres connection pool size, per process/replica. Each replica opens its
+# own pool (see db.py) - with N replicas, total connections against Postgres
+# is roughly N * DB_POOL_MAX_SIZE, so this needs to shrink as replica count
+# grows rather than staying at a single-instance-sized default. See
+# DEPLOYMENT.md's sizing guidance.
+DB_POOL_MAX_SIZE = int(os.environ.get('DB_POOL_MAX_SIZE', '10'))
 
 # frontend/ is the single source dir for all frontend files; the backend
 # serves the Vite build output straight from frontend/dist/ (no separate

@@ -1,19 +1,25 @@
-"""Unit tests for voice_transcriber.rate_limit - the sliding-window limiter
-and its FastAPI dependency wrapper. Deliberately doesn't hit real routes
-dozens of times to trip a limit; that's redundant with what these unit
-tests already prove directly, and would just slow the suite down.
+"""Unit tests for voice_transcriber.rate_limit - the Redis-backed
+sliding-window limiter and its FastAPI dependency wrapper. Deliberately
+doesn't hit real routes dozens of times to trip a limit; that's redundant
+with what these unit tests already prove directly, and would just slow the
+suite down.
+
+Run against a real fakeredis instance (isolated_redis, conftest.py), not a
+mocked hit()/per_user() - fakeredis's Lua/EVAL support was verified
+separately to actually execute rate_limit.py's sliding-window script
+correctly (see test_storage.py's neighbor note and SCALABILITY_AUDIT.md),
+so this is real coverage of the script's logic, not a stub.
 """
 import pytest
 from fastapi import HTTPException
+from redis import RedisError
 
 from voice_transcriber import rate_limit
 
 
 @pytest.fixture(autouse=True)
-def _clean_state():
-    rate_limit.reset_all()
+def _clean_state(isolated_redis):
     yield
-    rate_limit.reset_all()
 
 
 def test_hit_allows_up_to_the_limit_then_rejects():
@@ -32,21 +38,33 @@ def test_hit_is_scoped_per_key():
 
 def test_hit_allows_again_once_the_window_rolls_past(monkeypatch):
     now = [1000.0]
-    monkeypatch.setattr(rate_limit.time, "monotonic", lambda: now[0])
+    # time.time(), not time.monotonic(): the sliding window's score has to
+    # be a real wall-clock reading, comparable across replicas/processes -
+    # monotonic's reference epoch is arbitrary per-process (see
+    # rate_limit.py's module docstring), so it can't be shared this way.
+    monkeypatch.setattr(rate_limit.time, "time", lambda: now[0])
     assert rate_limit.hit("k", 1, 10) is True
     assert rate_limit.hit("k", 1, 10) is False
     now[0] += 11
     assert rate_limit.hit("k", 1, 10) is True
 
 
-def test_rejected_hits_are_not_themselves_counted():
+def test_rejected_hits_are_not_themselves_counted(isolated_redis):
     # A client stuck at the limit and retrying shouldn't burn through any
     # more of its own quota than the successful hits already used.
     assert rate_limit.hit("k", 1, 60) is True
     for _ in range(5):
         assert rate_limit.hit("k", 1, 60) is False
-    with rate_limit._lock:
-        assert len(rate_limit._buckets["k"]) == 1
+    assert isolated_redis.zcard("ratelimit:k") == 1
+
+
+def test_hit_raises_rate_limiter_unavailable_when_redis_down(monkeypatch):
+    def _raise(*a, **kw):
+        raise RedisError("simulated redis outage")
+
+    monkeypatch.setattr(rate_limit, "_get_script", lambda: _raise)
+    with pytest.raises(rate_limit.RateLimiterUnavailable):
+        rate_limit.hit("k", 1, 60)
 
 
 async def test_per_user_dependency_raises_429_once_exceeded():

@@ -52,22 +52,29 @@ jobs:
   backend-fast:
     name: Backend fast suite (pytest)
     runs-on: ubuntu-latest
+    # This job's Postgres container is destroyed at the end of every run -
+    # these are not real secrets, but pulled from repo-level Actions
+    # Variables/Secrets (Settings -> Secrets and variables -> Actions)
+    # instead of inline literals so the value exists in exactly one place
+    # (repeated identically in backend-integration below). Requires
+    # CI_POSTGRES_USER/CI_POSTGRES_DB (Variables) and CI_POSTGRES_PASSWORD
+    # (Secret) to be configured in the repo - see README.md's CI section.
     services:
       db:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: zenoscribe
-          POSTGRES_PASSWORD: zenoscribe
-          POSTGRES_DB: zenoscribe
+          POSTGRES_USER: ${{ vars.CI_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ vars.CI_POSTGRES_DB }}
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U zenoscribe"
+          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER }}"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://zenoscribe:zenoscribe@localhost:5432/zenoscribe
+      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER }}:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/${{ vars.CI_POSTGRES_DB }}
 
     steps:
       - name: Checkout
@@ -106,22 +113,38 @@ jobs:
   backend-integration:
     name: Backend integration suite (Playwright)
     runs-on: ubuntu-latest
+    # Same repo-level Variables/Secrets as backend-fast above - see that
+    # job's comment.
     services:
       db:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: zenoscribe
-          POSTGRES_PASSWORD: zenoscribe
-          POSTGRES_DB: zenoscribe
+          POSTGRES_USER: ${{ vars.CI_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ vars.CI_POSTGRES_DB }}
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U zenoscribe"
+          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # live_server (conftest.py) launches a real uvicorn subprocess, unlike
+      # backend-fast's in-process TestClient (which uses a fakeredis stand-in
+      # via the isolated_redis fixture - see rate_limit.py) - that subprocess
+      # needs an actual Redis reachable at config.py's default REDIS_URL
+      # (redis://localhost:6379/0) for rate limiting to work at all.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://zenoscribe:zenoscribe@localhost:5432/zenoscribe
+      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER }}:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/${{ vars.CI_POSTGRES_DB }}
 
     steps:
       - name: Checkout

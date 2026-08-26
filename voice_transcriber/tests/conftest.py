@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+import fakeredis
 import psycopg
 import pytest
 import requests
@@ -32,7 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from voice_transcriber import auth, config, db, rate_limit, soniox_client  # noqa: E402
+from voice_transcriber import auth, config, db, rate_limit, redis_client, soniox_client  # noqa: E402
 from voice_transcriber.server import app  # noqa: E402
 
 
@@ -89,7 +90,22 @@ def isolated_recordings(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def client(isolated_db, isolated_recordings, monkeypatch):
+def isolated_redis(monkeypatch):
+    """A fakeredis instance standing in for the real REDIS_URL - fakeredis
+    implements Redis's Lua/EVAL scripting (verified directly: it correctly
+    runs rate_limit.py's actual sliding-window script, not just simple
+    GET/SET), so this is real coverage of rate_limit.py's logic, not a stub
+    that merely avoids errors. No real Redis server is available in this
+    dev/CI environment - see SCALABILITY_AUDIT.md's environment note."""
+    fake = fakeredis.FakeRedis()
+    monkeypatch.setattr(redis_client, "_client", fake)
+    monkeypatch.setattr(rate_limit, "_script", None)
+    yield fake
+    fake.flushall()
+
+
+@pytest.fixture
+def client(isolated_db, isolated_recordings, isolated_redis, monkeypatch):
     """TestClient for the shared app, isolated from the real dev DB/recordings.
 
     ADMIN_USERNAME/ADMIN_PASSWORD are pinned to fixed test-only values before
@@ -101,10 +117,11 @@ def client(isolated_db, isolated_recordings, monkeypatch):
     the developer's real .env happens to set; tests that need hooks enabled
     monkeypatch it back to True themselves (see test_internal_test_hook.py).
 
-    rate_limit's counters are also cleared here: this fixture's `app` is the
-    one module-level FastAPI instance imported at the top of this file and
-    reused across every fast test, so without a reset, rate_limit's
-    in-memory buckets (keyed by user id / IP, both of which repeat a lot
+    rate_limit's counters are isolated per test via the isolated_redis
+    fixture (a fresh fakeredis instance each time) - this fixture's `app` is
+    the one module-level FastAPI instance imported at the top of this file
+    and reused across every fast test, so without that isolation,
+    rate_limit's counters (keyed by user id / IP, both of which repeat a lot
     across this suite - many tests share the "testclient" fake IP) would
     accumulate across the whole run instead of resetting per test.
     """

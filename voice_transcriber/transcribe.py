@@ -22,14 +22,18 @@ try:
     from . import auth
     from . import config
     from . import db
+    from . import live_sessions
     from . import rate_limit
     from . import soniox_client as sx
+    from . import storage
 except ImportError:  # run flat from inside the package dir
     import auth
     import config
     import db
+    import live_sessions
     import rate_limit
     import soniox_client as sx
+    import storage
 
 log = logging.getLogger("transcribe")
 
@@ -53,7 +57,13 @@ async def live(client: WebSocket):
     # else, same as the upload endpoints' per_user() limit but checked here
     # directly since WS auth happens via a frame, not a header FastAPI's
     # Depends() can see.
-    if not rate_limit.hit(f"ws-connect:{user_id}", 20, 300):
+    try:
+        allowed = await asyncio.to_thread(rate_limit.hit, f"ws-connect:{user_id}", 20, 300)
+    except rate_limit.RateLimiterUnavailable:
+        await client.send_json({"type": "error", "message": "Service temporarily unavailable, try again shortly"})
+        await client.close(code=1013)  # "Try Again Later"
+        return
+    if not allowed:
         await client.send_json({"type": "error", "message": "Too many connection attempts, try again shortly"})
         await client.close(code=4429)
         return
@@ -62,40 +72,18 @@ async def live(client: WebSocket):
     labeler = sx.SpeakerLabeler()
     loop = asyncio.get_event_loop()
 
+    # Registered so a graceful shutdown (server.py's shutdown hook) can ask
+    # this session to wrap up - see the stop_requested check in watchdog()
+    # below, and live_sessions.py's module docstring for why this is
+    # process-local, not shared state.
+    session_handle = live_sessions.register()
+
     alive = True
     finished = asyncio.Event()
     write_queue = asyncio.Queue()
 
     async def async_touch_seen(uid):
         await asyncio.to_thread(db.touch_seen, uid)
-
-    async def async_add_recording(rec_id, user_id, wav_file, txt_file,
-                                  started_at, duration, turn_count, preview):
-        await asyncio.to_thread(
-            db.add_recording,
-            rec_id,
-            user_id,
-            wav_file,
-            txt_file,
-            started_at,
-            duration,
-            turn_count,
-            preview,
-            "transcribe",
-        )
-
-    async def async_write_text(path, content):
-        await asyncio.to_thread(path.write_text, content, encoding="utf-8")
-
-    async def async_get_wav_duration(path):
-        def read_duration():
-            frames = wave.open(str(path), "rb")
-            try:
-                return frames.getnframes() / float(frames.getframerate() or 1)
-            finally:
-                frames.close()
-
-        return await asyncio.to_thread(read_duration)
 
     async def async_delete_file(path):
         await asyncio.to_thread(path.unlink)
@@ -137,7 +125,9 @@ async def live(client: WebSocket):
     started_at = datetime.now()
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
     session = f"{stamp}-{username}-{uuid.uuid4().hex[:6]}"
-    wav_path = config.RECORDINGS / f"{session}.wav"
+    # Scratch location only - the finished file is uploaded to storage and
+    # removed from here once the session ends (see _save_transcribe_session).
+    wav_path = config.live_scratch_dir() / f"{session}.wav"
 
     wf = wave.open(str(wav_path), "wb")
     wf.setnchannels(1)
@@ -349,9 +339,25 @@ async def live(client: WebSocket):
                 Soniox finalizes in bursts, so a gap between bursts can look
                 like silence mid-sentence. Requiring a completed word stops
                 turns splitting inside a word ("Def" / "initely").
+
+                Also checks session_handle.stop_requested: a graceful
+                shutdown (server.py) sets this to ask active sessions to
+                wrap up. Closing the client socket here reuses the exact
+                same teardown path a normal disconnect already takes
+                (pump_audio's WebSocketDisconnect handler, then the outer
+                finally block's flush+persist), rather than a separate,
+                less-tested shutdown-specific code path.
                 """
                 while not finished.is_set():
                     await asyncio.sleep(0.25)
+                    if session_handle.stop_requested.is_set():
+                        await safe_send({"type": "server_restarting"})
+                        await flush()
+                        try:
+                            await client.close(code=1001)  # "Going Away"
+                        except Exception:
+                            pass
+                        return
                     async with lock:
                         idle = loop.time() - state["last_final"]
                         text = _buf_text()
@@ -384,6 +390,7 @@ async def live(client: WebSocket):
         except Exception:
             pass
     finally:
+        session_handle.unregister()
         finished.set()
         await write_queue.put(None)
         try:
@@ -403,35 +410,64 @@ async def live(client: WebSocket):
                 log.exception("failed to delete empty wav %s", wav_path)
             return
 
-        txt_path = config.RECORDINGS / f"{session}.txt"
-        await async_write_text(
-            txt_path,
+        await _save_transcribe_session(session, user_id, username, wav_path, started_at, turns)
+
+
+def _wav_duration(path):
+    frames = wave.open(str(path), "rb")
+    try:
+        return frames.getnframes() / float(frames.getframerate() or 1)
+    finally:
+        frames.close()
+
+
+async def _save_transcribe_session(session, user_id, username, wav_path, started_at, turns):
+    """Persist a finished, non-empty live-transcription session: upload the
+    audio and transcript to storage, then register the DB row. Extracted out
+    of the websocket handler's `finally` block so it's directly testable
+    without a live Soniox connection - mirrors translate.py's
+    _save_translate_session, including the same "each step independently
+    caught and logged" behavior so one failure doesn't hide or skip another.
+
+    Duration is read from the local scratch file *before* uploading it -
+    storage.upload() consumes (deletes) the local copy on success.
+    """
+    wav_key = storage.recording_key(user_id, session, ".wav")
+    txt_key = storage.recording_key(user_id, session, ".txt")
+
+    try:
+        duration = await asyncio.to_thread(_wav_duration, wav_path)
+    except Exception:
+        log.exception("failed to read wav duration %s", wav_path)
+        duration = 0.0
+
+    try:
+        await asyncio.to_thread(storage.get_storage().upload, wav_key, wav_path, "audio/wav")
+    except Exception:
+        log.exception("failed to store recording audio %s", wav_key)
+
+    try:
+        await asyncio.to_thread(
+            storage.get_storage().upload_text,
+            txt_key,
             "\n".join(
                 f"[{(t['start'] or 0):.1f}s] {t['speaker']}: {t['text']}"
                 for t in turns
             ),
         )
+    except Exception:
+        log.exception("failed to store transcript %s", txt_key)
 
-        try:
-            duration = await async_get_wav_duration(wav_path)
-        except Exception:
-            duration = 0.0
-
-        preview = " ".join(t["text"] for t in turns)[:160]
-        try:
-            await async_add_recording(
-                rec_id=session,
-                user_id=user_id,
-                wav_file=wav_path.name,
-                txt_file=txt_path.name,
-                started_at=started_at.isoformat(),
-                duration=duration,
-                turn_count=len(turns),
-                preview=preview,
-            )
-        except Exception:
-            log.exception("could not register recording %s", session)
-
+    preview = " ".join(t["text"] for t in turns)[:160]
+    try:
+        await asyncio.to_thread(
+            db.add_recording,
+            session, user_id, wav_key, txt_key,
+            started_at.isoformat(), duration, len(turns), preview, "transcribe",
+        )
+    except Exception:
+        log.exception("could not register recording %s", session)
+    else:
         log.info(
             "saved %s for %s (%d turns, %.1fs)",
             session, username, len(turns), duration,

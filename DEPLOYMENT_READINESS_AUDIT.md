@@ -5,6 +5,30 @@
 *Audited against commit `b44ebb3` (2026-08-24). This document is kept current, not a
 dated snapshot — see the note below.*
 
+*Update (2026-08-25): a separate horizontal-scalability pass added MinIO-backed storage,
+Redis-backed rate limiting, and a required shared `SERVER_BOOT_ID`, resolving the three
+multi-replica blockers this document's "If you scale beyond one container" section used
+to describe as open (now marked fixed there, kept as history). That work's own verdict,
+scope, and verification status - separate from this document's single-VM/single-`web`-
+container verdict above, which still stands unchanged - lives in
+`HORIZONTAL_SCALABILITY_READINESS.md`. This document was not otherwise re-audited this
+pass; its other findings (TLS/nginx bootstrap, disk/certificate monitoring, etc.) are
+unrelated to that work and unchanged.*
+
+*Update (2026-08-25, later same day): Docker Desktop is now installed and working in
+this environment - the "no Docker available" caveat attached to several findings below
+(P1-B, "Unverified / needs access") no longer applies to dev tooling in general. What
+was actually run: `docker-compose.yml` (the **dev** stack - `db`/`redis`/`minio`/
+`migrate`/`web`/`frontend`) end to end, repeatedly, including a full container-replace
+cycle and the complete test suite against it. `docker-compose.prod.yml` (nginx/certbot/
+TLS bootstrap) was **not** touched or run this pass - P1-B stands exactly as written.
+Separately, a real dependency bug was found and fixed: `requirements-dev.txt`'s
+`fakeredis==2.37.1` pin has no working Lua/`EVALSHA` support without the `lua` extra
+(`lupa`), which `rate_limit.py`'s sliding-window script requires on every request
+(`GlobalRateLimitMiddleware` runs globally) - a fresh `pip install -r
+requirements-dev.txt` reproduced this and failed 69 of 131 fast-suite tests. Fixed to
+`fakeredis[lua]==2.37.1` + `lupa==2.8`; full suite re-run clean after. See "Fixed" below.*
+
 The fail-closed production guards, ownership checks, and rate limiting all hold up under
 direct code and runtime inspection — this is a materially more careful pre-launch
 codebase than most, and its own `DEPLOYMENT.md`/`E2E_Review.md` already document several
@@ -14,8 +38,9 @@ production edge was rebuilt this same commit (Caddy → nginx + certbot); that r
 introduced one real security regression (X-Forwarded-For spoofing, below) which was
 caught and fixed in this same audit pass, and it introduces one new condition that
 supersedes everything else here: **the new nginx/certbot stack has never actually been
-run** (no Docker available in the environment this was built in), so it needs a real
-end-to-end verification before go-live in a way the previous Caddy setup already had.
+run** (`docker-compose.prod.yml` specifically - see the 2026-08-25 update note above),
+so it needs a real end-to-end verification before go-live in a way the previous Caddy
+setup already had.
 Disk-growth monitoring and certificate-expiry monitoring both remain unwired operational
 tasks that must happen before go-live.
 
@@ -79,12 +104,15 @@ deploy.
 **Evidence:** `frontend/nginx.conf` (TLS termination, routing, security headers),
 `scripts/init-letsencrypt.sh` (first-boot dummy-cert → real-cert bootstrap), and the
 `nginx`/`certbot` services in `docker-compose.prod.yml` were all written and committed in
-this same session, entirely without access to Docker (`docker: command not found` in
-every environment this was developed in — confirmed again this pass). Verification so far
-has been static only: YAML parses, nginx config braces balance, every cross-file
-reference is internally consistent, and the logic was reasoned through carefully — but
-none of that proves nginx actually starts, that the certbot bootstrap script's dummy-cert
-handoff works as written, or that a real Let's Encrypt certificate gets issued.
+an earlier session, entirely without access to Docker. Docker is now available in this
+environment (Docker Desktop installed 2026-08-25) and the **dev** stack
+(`docker-compose.yml`) has since been run end to end repeatedly — but `docker-compose.prod.yml`
+itself (this finding's actual subject: nginx, certbot, the TLS bootstrap script) has
+still not been built or run even once. Verification so far remains static only: YAML
+parses, nginx config braces balance, every cross-file reference is internally consistent,
+and the logic was reasoned through carefully — but none of that proves nginx actually
+starts, that the certbot bootstrap script's dummy-cert handoff works as written, or that
+a real Let's Encrypt certificate gets issued.
 
 **Failure scenario:** this is the single edge every request passes through. A mistake
 that only manifests at runtime (a typo in a `proxy_pass` target, a missing directory for
@@ -157,6 +185,25 @@ remaining). Set it up before go-live, same as P1-C.
   `alembic upgrade head` — but it was previously only present transitively through
   `alembic`'s own dependency graph, unpinned. Added explicitly to `requirements.txt`,
   pinned to the version actually installed (`2.0.49`).
+- **`fakeredis`'s Lua/`EVALSHA` support was silently unavailable — Fixed (2026-08-25).**
+  `requirements-dev.txt` pinned `fakeredis==2.37.1` without the `lua` extra; bare
+  `fakeredis` raises `unknown command 'evalsha'` for `rate_limit.py`'s sliding-window
+  script, and since `GlobalRateLimitMiddleware` runs on every request, this broke 69 of
+  131 fast-suite tests on a fresh `pip install -r requirements-dev.txt` (confirmed
+  directly, not assumed). CI/any environment that happened to already have `lupa`
+  installed from unrelated prior work would never have seen this. Fixed:
+  `fakeredis[lua]==2.37.1` + `lupa==2.8`, both pinned exact. Full suite re-run clean.
+- **Two real `docker-compose.yml` (dev) bugs found and fixed (2026-08-25) while bringing
+  up Docker for the first time in this environment.** Neither affects production
+  (`docker-compose.prod.yml` was untouched), but both silently broke the documented dev
+  workflow: (1) `DATABASE_URL`/`REDIS_URL` overrides for `migrate`/`web` used a
+  `${VAR:-default}` fallback that never actually triggered, since `.env.example` ships
+  both non-empty (for the bare-`uvicorn`-on-host workflow) and Compose reads that value
+  for substitution regardless of what the container needs — both now hardcoded to the
+  container-network value instead. (2) `db`/`redis` never published ports to the host at
+  all, so bootstrap.sh/bootstrap.ps1's own documented instruction to run them via Compose
+  and then run `uvicorn`/`pytest` bare on the host was never actually reachable — both
+  now publish to `localhost` in dev only.
 
 ---
 
@@ -218,15 +265,28 @@ remaining). Set it up before go-live, same as P1-C.
 
 ## Verified working
 
-- Full fast backend suite: `python -m pytest -q` → **81 passed, 21 deselected**, re-run
-  this pass.
-- `python -m flake8 voice_transcriber scripts --max-line-length=120` → clean, re-run this
-  pass.
+- Full fast backend suite: `python -m pytest -q` → **131 passed, 21 deselected**
+  (2026-08-25 - count moved from 81 as new tests were added for storage/live-sessions/
+  redis/reconciliation work; only reached 131-clean after the `fakeredis[lua]` fix above).
+- Full integration/E2E suite: `python -m pytest -q -m integration` (real Playwright
+  browsers against a real `uvicorn` subprocess + real Postgres/Redis) → **19 passed**
+  (2026-08-25) - not previously listed in this section. First attempt errored on all 19
+  (Redis became unreachable mid-run, traced to the Docker Desktop containers having gone
+  away partway through a ~48-minute run - not a code defect); re-run clean at ~4.5 minutes
+  once containers were confirmed back up throughout.
+- `python -m flake8 voice_transcriber scripts --max-line-length=120` → clean (2026-08-25,
+  matching CI's actual invocation - the default 79-char width flags unrelated pre-existing
+  long lines across most of the backend and is not what CI gates on).
 - Frontend build: `npm --prefix frontend run build` → succeeds, `login.js` (this
   session's CSP fix) lands in `dist/` correctly.
-- Frontend suite: `npm --prefix frontend test` → **212 passed (212)**, re-run this pass.
-- `docker-compose.prod.yml` parses as valid YAML with the expected four services (`db`,
-  `web`, `nginx`, `certbot`) and four volumes.
+- Frontend suite: `npm --prefix frontend test` → **212 passed (212)** (2026-08-25).
+- `docker-compose.yml` (dev): full stack (`db`, `redis`, `minio`, `migrate`, `web`,
+  `frontend`) brought up end to end repeatedly, including a full container-replace cycle
+  (`down`/`up`) - data in named volumes (`pgdata`, `miniodata`) confirmed to survive.
+  `frontend`'s hot-reload was verified against a real file edit through the bind mount.
+- `docker-compose.prod.yml` parses as valid YAML with the expected seven services (`db`,
+  `redis`, `minio`, `migrate`, `web`, `nginx`, `certbot`) and four volumes. **Still not
+  built or run** - see P1-B.
 - `frontend/nginx.conf` has balanced braces (14 open / 14 close) — a syntax sanity check
   only, not a substitute for `nginx -t` (see P1-B).
 - `uvicorn/middleware/proxy_headers.py`'s trust behavior confirmed by reading the
@@ -240,10 +300,11 @@ remaining). Set it up before go-live, same as P1-C.
 
 ## Unverified / needs access
 
-- **A live `docker-compose.prod.yml` run, end to end.** Still no `docker` CLI in this
-  environment. This is now P1-B above rather than a background item — the new edge stack
-  specifically needs this, not just a nice-to-have re-confirmation of already-working
-  infrastructure.
+- **A live `docker-compose.prod.yml` run, end to end.** Docker itself is no longer the
+  blocker (Docker Desktop installed 2026-08-25, confirmed working against the dev
+  stack) — this specific compose file just hasn't been pointed at yet. This is P1-B
+  above, not a background item — the new edge stack specifically needs this, not just a
+  nice-to-have re-confirmation of already-working infrastructure.
 - **Actual VM disk size and expected concurrent-usage volume** for P1-C — depends on the
   target VM, not knowable from the repo.
 - **Whether any external monitoring is actually watching `/healthz`, disk usage, and
@@ -295,6 +356,8 @@ openssl s_client -connect $DOMAIN:443 -servername $DOMAIN </dev/null 2>/dev/null
 # 12. Full test suite green on the exact deployed commit
 python -m flake8 voice_transcriber scripts --max-line-length=120
 python -m pytest -q
+python -m pytest -q -m integration   # real Playwright E2E suite - needs Postgres/Redis
+                                      # reachable and Playwright browsers installed
 npm --prefix frontend run build
 npm --prefix frontend test
 
@@ -321,18 +384,37 @@ curl -sI https://$DOMAIN/ | grep -Ei 'strict-transport|x-frame|x-content-type|co
 
 ## If you scale beyond one container
 
-Kept separate from the verdict above per this audit's scope — already accurately
-documented in `E2E_Review.md`'s "Open items" §1 and not launch risks for the single-VM/
-`--workers 1`/single-container deployment this repo actually ships:
+**Update (this pass): the three blockers below are now fixed** - MinIO-backed storage,
+Redis-backed rate limiting, and a required shared `SERVER_BOOT_ID` are all implemented.
+Full detail, file:line citations, and verification status (what was actually run against
+real Postgres/fakeredis here vs. what needs a real multi-replica Docker Compose run on
+your VM) live in `SCALABILITY_AUDIT.md`, `SCALABILITY_DESIGN.md`, and
+`HORIZONTAL_SCALABILITY_READINESS.md` - that last one carries the same PASS/FAIL/WARNING
+verdict format this document uses, scoped specifically to the horizontal-scaling work.
+This section is kept (not deleted) as a historical record of what the blockers were;
+`E2E_Review.md`'s "Open items" §1 has been updated to point here instead of repeating it.
 
-- **Recordings storage** is a local named Docker volume; a second replica can't see the
-  first's files. Needs S3-compatible object storage before any horizontal scale.
-- **`SERVER_BOOT_ID`** is generated per-process; multiple instances would each mint their
-  own, so a session would randomly 401 depending on which instance handled a given
-  request. Needs a shared value or a shared session-validity store.
-- **`rate_limit.py`** counters are an in-memory `dict` per process — multiple instances
-  multiply a user's effective quota by instance count rather than enforcing one global
-  limit. Needs Redis or equivalent shared state to stay precise at scale.
-- **`--workers 1` is load-bearing**, not just a default — raising it without addressing
-  `SERVER_BOOT_ID` and concurrent-migration-on-startup first would reintroduce both
-  problems inside a single container, before even reaching multi-container concerns.
+- ~~**Recordings storage** is a local named Docker volume; a second replica can't see the
+  first's files.~~ Fixed: `voice_transcriber/storage/` abstracts recording storage behind
+  `StorageService`, with a MinIO backend required in production
+  (`STORAGE_BACKEND=minio`). See `SCALABILITY_AUDIT.md` finding F1.
+- ~~**`SERVER_BOOT_ID`** is generated per-process...~~ Fixed: now a required (not just
+  recommended) production env var, refused-to-boot if unset - every replica reading the
+  same value from the same `.env.production` no longer randomly 401s. See finding F3.
+- ~~**`rate_limit.py`** counters are an in-memory `dict` per process...~~ Fixed:
+  `rate_limit.py` now uses a Redis-backed sliding-window Lua script, verified to preserve
+  the exact prior semantics (rejected hits don't count, independent per-key windows) via
+  a real Lua-executing `fakeredis` instance, not a mock. See finding F2.
+- **`--workers 1` is still load-bearing** - this was never actually about single- vs.
+  multi-container; it's about one turn-detection state machine per live session having no
+  cross-worker coordination. Scale by adding `web` *containers* (`docker compose ...
+  --scale web=N`), not by raising `--workers` inside one container.
+- **New, previously-undocumented finding this pass (F7):** even with the three blockers
+  above fixed, `frontend/nginx.conf`'s bare `proxy_pass http://web:8000` would silently
+  fail to load-balance across `--scale web=N` replicas (nginx caches the first resolved
+  IP for a worker's lifetime). Fixed with a `resolver`/variable-based `proxy_pass` - see
+  `SCALABILITY_AUDIT.md` finding F7.
+- Migrations no longer auto-apply on every replica's startup either (this would have
+  raced across concurrently-starting replicas) - now an explicit one-shot `migrate`
+  Compose service; `web`'s own startup only verifies the schema matches, never mutates
+  it. See `SCALABILITY_AUDIT.md` finding F4.

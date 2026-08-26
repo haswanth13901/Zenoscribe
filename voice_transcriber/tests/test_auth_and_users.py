@@ -183,3 +183,26 @@ def test_admin_write_rate_limit_then_429(client, make_user):
         headers=headers, json={"is_active": True},
     )
     assert r.status_code == 429
+
+
+def test_admin_create_user_rejects_unsafe_username(client, make_user):
+    """A username becomes part of every recording's storage key (see
+    storage/base.py's recording_key()) - reject anything that could reach a
+    local-backend filesystem path unsafely (a slash, or a ".." sequence),
+    found and closed during the storage-abstraction security review rather
+    than a previously-reported bug."""
+    make_user("username_admin", "UsernameAdminPass123!", role="admin")
+    headers = _login(client, "username_admin", "UsernameAdminPass123!")
+
+    for bad_username in ("../../etc/passwd", "a/b", "a\\b", "a..b", "user name"):
+        r = client.post(
+            "/api/admin/users", headers=headers,
+            json={"username": bad_username, "password": "SomePass123!"},
+        )
+        assert r.status_code == 400, f"{bad_username!r} should have been rejected"
+
+    r = client.post(
+        "/api/admin/users", headers=headers,
+        json={"username": "a.valid_user-1", "password": "SomePass123!"},
+    )
+    assert r.status_code == 200

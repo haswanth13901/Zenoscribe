@@ -38,20 +38,19 @@ image, and the workflow's own GitHub Actions.
 
 ## Open items
 
-1. **Multi-instance scale — three things assume a single process today.**
-   Fine for a single container (a named Docker volume covers recordings —
-   see README's Production section). If this ever runs as more than one
-   instance at once (load-balanced replicas, etc.), all three need
-   revisiting: (a) a local volume isn't shared across instances, needs
-   S3-compatible object storage; (b) `SERVER_BOOT_ID` (`auth.py`) is
-   generated per-process, so sessions randomly invalidate when a request
-   lands on a different instance; (c) rate limiting (`rate_limit.py`) is an
-   in-memory counter per-process, so a per-user limit effectively multiplies
-   by instance count instead of being enforced globally (a user could get N×
-   their intended quota by getting round-robined across N instances - not a
-   security hole on its own, just a soft cap that stops being precise).
-   Revisit if/when real scale needs come up — not worth building ahead of
-   that.
+1. **Multi-instance scale — fixed (2026-08-25).** The three things that used
+   to assume a single process are addressed: (a) recording storage now goes
+   through `voice_transcriber/storage/`, with a required MinIO backend in
+   production instead of a local volume; (b) `SERVER_BOOT_ID` (`auth.py`) is
+   now a required, shared production value instead of a per-process random
+   one; (c) rate limiting (`rate_limit.py`) is now Redis-backed instead of
+   an in-memory counter. Full detail, verification status (what was run
+   against real Postgres/fakeredis here vs. what needs a real multi-replica
+   Docker Compose run on a VM with Docker available), and remaining
+   single-points-of-failure (Postgres/Redis/MinIO/the VM itself are each
+   still one instance - only `web` is now horizontally scalable) live in
+   `SCALABILITY_AUDIT.md`, `SCALABILITY_DESIGN.md`, and
+   `HORIZONTAL_SCALABILITY_READINESS.md`.
 2. **Secret rotation.** Code-side guards exist (production refuses to boot
    on a missing/weak `DATABASE_URL`/`JWT_SECRET`/`ADMIN_PASSWORD`, or with
    `ALLOW_TEST_HOOKS=true`). What's left is manual: rotate the live Soniox

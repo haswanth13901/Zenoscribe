@@ -3,16 +3,22 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // Dev: `vite` (this file) serves the app on FRONTEND_PORT and proxies
-// API/WS calls to the backend uvicorn process on BACKEND_PORT (see
-// README/DEPLOYMENT.md's two-terminal dev workflow) - the proxy is what
-// keeps the browser effectively same-origin in dev, so
+// API/WS calls to the backend uvicorn process on BACKEND_HOST:BACKEND_PORT
+// (see README/DEPLOYMENT.md's two-terminal dev workflow) - the proxy is
+// what keeps the browser effectively same-origin in dev, so
 // window.location.origin (baseApi.ts) and window.location.host
 // (useRecorderConnection.ts, useTranslateConnection.ts) resolve correctly
-// without any dev-only branching in that code. Both ports default to this
-// repo's convention (frontend 8000, backend 3000) but are read from the
-// environment rather than repeated as literals below, so there is exactly
-// one place each is defined - override with FRONTEND_PORT/BACKEND_PORT env
-// vars if you ever need to.
+// without any dev-only branching in that code. All three default to this
+// repo's convention (frontend 8000, backend host `localhost`, port 3000)
+// but are read from the environment rather than repeated as literals
+// below, so there is exactly one place each is defined - override with
+// FRONTEND_PORT/BACKEND_HOST/BACKEND_PORT env vars if you ever need to.
+// BACKEND_HOST is what lets this same config run either paired with a bare
+// `uvicorn` process on the host (the default, "localhost") or containerized
+// in docker-compose.yml's `frontend` service, which sets it to "web" - the
+// Compose service name - so the proxy resolves inside the container network
+// instead of trying (and failing) to reach the frontend container's own
+// loopback interface.
 //
 // Prod: build assets are served by FastAPI's existing /static mount,
 // straight from frontend/dist/ (see config.FRONTEND_DIST_DIR and
@@ -26,8 +32,9 @@ import react from "@vitejs/plugin-react";
 // to be requested in the browser; "/static/" only for the production
 // build, unchanged from before.
 const FRONTEND_PORT = Number(process.env.FRONTEND_PORT) || 8000;
+const BACKEND_HOST = process.env.BACKEND_HOST || "localhost";
 const BACKEND_PORT = Number(process.env.BACKEND_PORT) || 3000;
-const backendTarget = `http://localhost:${BACKEND_PORT}`;
+const backendTarget = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 
 export default defineConfig(({ command }) => ({
   plugins: [
@@ -64,6 +71,16 @@ export default defineConfig(({ command }) => ({
   server: {
     port: FRONTEND_PORT,
     strictPort: true,
+    // Polling, not native fs events, when running in Docker (WATCH_POLL=1,
+    // set by docker-compose.yml's `frontend` service only): a bind mount of
+    // a Windows/macOS host path into a Linux container doesn't reliably
+    // propagate the host's native file-change notifications through
+    // Docker Desktop's virtualization layer, so Vite's default watcher can
+    // sit indefinitely without seeing an edit - confirmed directly (an
+    // edited file produced zero HMR log output). The bare-host workflow
+    // (README's two-terminal setup) doesn't set this and keeps native
+    // events, which are instant and don't burn CPU polling.
+    watch: process.env.WATCH_POLL ? { usePolling: true, interval: 300 } : undefined,
     proxy: {
       // Exact-match regexes (Vite treats a "^"-prefixed key as a RegExp,
       // not a prefix) for the two vanilla, backend-owned pages - "/" and

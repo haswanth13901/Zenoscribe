@@ -1,18 +1,96 @@
 services:
   db:
     image: postgres:16-alpine
+    # Read from .env (Compose substitutes ${VAR} in this file from the
+    # plain .env in this same directory automatically - no --env-file flag
+    # needed for that, unlike docker-compose.prod.yml's differently-named
+    # .env.production). Defaults (:-zenoscribe) match this repo's long-
+    # standing dev convention and only take effect if .env doesn't set
+    # these - see .env.example's Postgres login block.
     environment:
-      POSTGRES_USER: zenoscribe
-      POSTGRES_PASSWORD: zenoscribe
-      POSTGRES_DB: zenoscribe
+      POSTGRES_USER: ${POSTGRES_USER:-zenoscribe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zenoscribe}
+      POSTGRES_DB: ${POSTGRES_DB:-zenoscribe}
+    # Published to the host (dev only - docker-compose.prod.yml deliberately
+    # omits this) so `web`/`migrate` running as containers reach it via the
+    # `db` service name while a bare `uvicorn`/`pytest` run on the host - the
+    # workflow bootstrap.sh/bootstrap.ps1 and README both document - can
+    # also reach it via DATABASE_URL's localhost default. Without this,
+    # that documented workflow was never actually reachable.
+    ports:
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zenoscribe"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zenoscribe}"]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  # Required unconditionally (not just for STORAGE_BACKEND=minio): rate
+  # limiting has no in-memory fallback any more - see rate_limit.py and
+  # SCALABILITY_AUDIT.md finding F2. STORAGE_BACKEND stays "local" by
+  # default in dev (see .env.example), so `minio` below is opt-in, but
+  # `redis` is not.
+  redis:
+    image: redis:7-alpine
+    # Published to the host - same reasoning as db's `ports:` above.
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Opt-in: only needed if you set STORAGE_BACKEND=minio locally to test
+  # against a real object store instead of the local-disk default. Console
+  # at http://localhost:9001 (login with the access/secret key below).
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: zenoscribe-dev
+      MINIO_ROOT_PASSWORD: zenoscribe-dev-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # One-shot: applies Alembic migrations, then exits. `web` waits for this
+  # to finish successfully before starting (see its depends_on below) -
+  # migrations are no longer run automatically inside web's own startup
+  # (see db.init()'s docstring / SCALABILITY_AUDIT.md finding F4), even in
+  # dev, so dev and prod share the same deploy shape.
+  migrate:
+    build:
+      context: .
+      target: backend-with-frontend
+    env_file:
+      - .env
+    environment:
+      # Unconditional, not a ${DATABASE_URL:-...} fallback: .env.example
+      # ships DATABASE_URL already set (to a localhost URL, for the bare
+      # `uvicorn` host workflow), so a fallback never actually triggers -
+      # Compose reads that non-empty value for substitution regardless of
+      # what a container needs. Inside this network the `db` service is
+      # always reachable at that name, so hardcode it; only the login
+      # itself stays parameterized via POSTGRES_*.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-zenoscribe}:${POSTGRES_PASSWORD:-zenoscribe}@db:5432/${POSTGRES_DB:-zenoscribe}
+    command: python -c "from voice_transcriber import db; db.init()"
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
 
   web:
     build:
@@ -31,14 +109,32 @@ services:
       - "${PORT:-3000}:${PORT:-3000}"
     env_file:
       - .env
+    environment:
+      # Point at the Compose service names, not localhost - config.py's own
+      # defaults (localhost) are for running uvicorn directly on the host,
+      # not inside this container.
+      #
+      # DATABASE_URL/REDIS_URL are unconditional (not ${VAR:-...} fallbacks):
+      # .env.example ships both already set to localhost URLs for the bare
+      # `uvicorn` host workflow, so a fallback never actually triggers -
+      # Compose reads that non-empty value for substitution regardless of
+      # what this container needs. MINIO_* keeps the fallback form since
+      # .env.example ships those commented out, so an unset var genuinely
+      # falls through to the default here - still overridable via .env if
+      # you're running minio elsewhere.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-zenoscribe}:${POSTGRES_PASSWORD:-zenoscribe}@db:5432/${POSTGRES_DB:-zenoscribe}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-zenoscribe-dev}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-zenoscribe-dev-secret}
     # Only backend source is bind-mounted for live-edit convenience - the
     # image's baked frontend/dist (built by the backend-with-frontend
     # target's frontend-build stage) is deliberately left alone so it isn't
-    # shadowed by a missing or stale host-side build. As a side effect, this
-    # already makes recordings/ (written under voice_transcriber/) persist
-    # on the host across `docker compose up`/`down` here in dev - production
-    # deploys don't get this mount and need their own volume, see the
-    # README's "Production" > Docker section.
+    # shadowed by a missing or stale host-side build. STORAGE_BACKEND stays
+    # "local" by default (.env.example), so recordings/ still persists on
+    # the host across `docker compose up`/`down` here exactly as before -
+    # production has no local recordings state left to persist at all once
+    # STORAGE_BACKEND=minio (see docker-compose.prod.yml).
     volumes:
       - ./voice_transcriber:/app/voice_transcriber
       - ./alembic:/app/alembic
@@ -49,6 +145,48 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Containerized equivalent of README's "two-terminal" hot-reload workflow
+  # (`npm --prefix frontend run dev` on the host, paired with `web` above) -
+  # its own image (frontend/Dockerfile's `dev` target), separate from `web`,
+  # mirroring how docker-compose.prod.yml splits frontend (nginx) from
+  # backend (web) rather than bundling them. `web` still bakes frontend/dist
+  # in too (see its own comment above) - that's a distinct, narrower need
+  # (serving login.html/static assets, which are backend-owned vanilla
+  # files, not part of the React app this container hot-reloads) than what
+  # this service is for: live-editing frontend/src/.
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: dev
+    environment:
+      # BACKEND_HOST=web overrides vite.config.ts's "localhost" default -
+      # see that file's own comment on why this container needs it and a
+      # bare-host `npm run dev` doesn't.
+      BACKEND_HOST: web
+      BACKEND_PORT: ${PORT:-3000}
+      FRONTEND_PORT: ${FRONTEND_PORT:-8000}
+      # See vite.config.ts's own comment: a host-path bind mount needs
+      # polling to reliably see edits inside this container.
+      WATCH_POLL: "1"
+    ports:
+      - "${FRONTEND_PORT:-8000}:${FRONTEND_PORT:-8000}"
+    # frontend/ itself is bind-mounted for live-edit hot reload; node_modules
+    # stays a separate anonymous volume so it's populated from what the
+    # image's own `npm ci` installed (Linux binaries - esbuild/Rollup ship
+    # platform-specific native binaries) rather than getting shadowed by
+    # whatever - or nothing - exists at ./frontend/node_modules on the host.
+    volumes:
+      - ./frontend:/app/frontend
+      - /app/frontend/node_modules
+    depends_on:
+      - web
 
 volumes:
   pgdata:
+  miniodata:

@@ -1,9 +1,21 @@
 # Production Compose file - single VM, behind nginx.
 #
-# Four services, three separately-built/pulled images:
-#   db        stock postgres:16-alpine, no custom Dockerfile
+# Seven services:
+#   db        stock postgres:16-alpine, no custom Dockerfile - relational
+#             source of truth (users, recording metadata).
+#   redis     stock redis:7-alpine, no custom Dockerfile - shared rate-limit
+#             counters only, no durable data, no volume (see rate_limit.py).
+#   minio     stock minio/minio, no custom Dockerfile - shared S3-compatible
+#             object storage for recording audio/transcripts (see
+#             voice_transcriber/storage/). Durable - has a volume.
+#   migrate   one-shot: applies Alembic migrations, then exits. `web` won't
+#             start until this completes successfully - migrations are an
+#             explicit deploy step, never run automatically by a replica's
+#             own startup (see db.init()'s docstring / SCALABILITY_AUDIT.md
+#             finding F4). Same image as `web`.
 #   web       backend only (Dockerfile's default `backend` target) - API/WS
-#             routes, nothing else. Built from the repo root.
+#             routes, nothing else. Built from the repo root. Stateless -
+#             safe to run multiple replicas of (see "Scaling" below).
 #   nginx     TLS termination, routing to `web`, and the SPA/login static
 #             files, all in one container (frontend/Dockerfile,
 #             frontend/nginx.conf). Built from the repo root too (needs
@@ -13,15 +25,29 @@
 #             scripts/init-letsencrypt.sh for the required one-time first
 #             boot step.
 #
-# Differences from docker-compose.yml (dev-only, left untouched, and a
-# single combined web container there - see that file's own comments):
+# Scaling `web` beyond one replica (plain Compose, no Swarm needed):
+#   docker compose --env-file .env.production -f docker-compose.prod.yml \
+#     up -d --scale web=3
+# frontend/nginx.conf's `resolver`/`$backend` directives make this actually
+# load-balance across the replicas Docker's embedded DNS returns, not just
+# pin to whichever one nginx resolved first - see that file's comment and
+# SCALABILITY_AUDIT.md finding F7. See DEPLOYMENT.md for the full runbook,
+# including DB_POOL_MAX_SIZE sizing guidance as replica count grows.
+#
+# Differences from docker-compose.yml (dev-only, left untouched - see that
+# file's own comments):
 #   - no source bind-mounts; runs whatever was baked into the image at build
 #   - env_file: .env.production instead of .env
 #   - Postgres credentials come from the environment, not literals
-#   - `web` is never published to the host at all (`expose:` only) - nginx
-#     is the only public entry point. See frontend/nginx.conf.
-#   - named volumes for both pgdata and recordings, so `down`/`up` and image
-#     upgrades don't lose data
+#   - `web`/`redis`/`minio` are never published to the host at all
+#     (`expose:` only, or no ports: entry at all) - nginx is the only public
+#     entry point. See frontend/nginx.conf. Never expose Postgres/Redis/
+#     MinIO directly to the public internet.
+#   - named volumes for pgdata and miniodata, so `down`/`up` and image
+#     upgrades don't lose data - `web` no longer has (or needs) a recordings
+#     volume at all once STORAGE_BACKEND=minio: the only thing it ever
+#     writes locally is an ephemeral live-session scratch file, gone the
+#     moment that session ends (see config.live_scratch_dir())
 #   - per-service log rotation, so container logs can't fill the disk
 #
 # Usage:
@@ -62,6 +88,60 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # Rate-limit counters only - no durable data, no volume by design (see
+  # rate_limit.py, SCALABILITY_DESIGN.md §3). Losing this on restart just
+  # means a brief window of freshly-reset counters, never data loss.
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Durable recording storage (audio + transcripts) - has a real volume,
+  # unlike redis above. Single instance/single disk: see DEPLOYMENT.md's
+  # storage-HA section for what this does and doesn't protect against.
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - miniodata:/data
+    expose:
+      - "9000"
+      - "9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    logging: *default-logging
+
+  # One-shot: applies Alembic migrations, then exits successfully. `web`
+  # waits for this (see its depends_on below) rather than migrating itself -
+  # see this file's header comment and SCALABILITY_AUDIT.md finding F4.
+  migrate:
+    build: .
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    command: python -c "from voice_transcriber import db; db.init()"
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *default-logging
+
   web:
     # Backend-only image (Dockerfile's default `backend` target - no
     # frontend baked in). The frontend is the separate `nginx` service
@@ -73,23 +153,37 @@ services:
       # DATABASE_URL is composed here from the same POSTGRES_* vars given to
       # `db` above, so the two never drift apart. Put POSTGRES_USER/
       # POSTGRES_PASSWORD/POSTGRES_DB and everything else (SONIOX_API_KEY,
-      # JWT_SECRET, ADMIN_PASSWORD, ...) in .env.production - see
-      # .env.production.example.
+      # JWT_SECRET, ADMIN_PASSWORD, REDIS_URL, STORAGE_BACKEND, MINIO_*, ...)
+      # in .env.production - see .env.production.example.
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     expose:
       - "8000"
-    volumes:
-      - recordings:/app/voice_transcriber/recordings
+    # No recordings volume any more: STORAGE_BACKEND=minio means the only
+    # thing web ever writes locally is an ephemeral live-session scratch
+    # file (config.live_scratch_dir()), gone the moment that session ends -
+    # nothing here needs to survive a container restart/replacement.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status == 200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    # Must exceed GRACEFUL_SHUTDOWN_GRACE_SEC (.env.production, default 30s)
+    # with headroom for the drain loop's own overhead - otherwise Docker
+    # SIGKILLs the process before server.py's shutdown hook finishes waiting
+    # for active live sessions to persist their recording (see server.py,
+    # live_sessions.py).
+    stop_grace_period: 40s
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     logging: *default-logging
 
   nginx:
@@ -147,6 +241,6 @@ services:
 
 volumes:
   pgdata:
-  recordings:
+  miniodata:
   certbot_conf:
   certbot_www:
