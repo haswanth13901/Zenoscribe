@@ -1,0 +1,151 @@
+name: Release gate
+
+# Tier 3 of the branch model (see CONTRIBUTING.md's CI section): everything
+# that must be true before `main` is trusted to deploy. Runs on every PR
+# into `main`, every push to `main`, and every version tag - deliberately no
+# `paths:` filter (unlike ci.yml/Tier 1-2): a release PR must run the full
+# gate regardless of which files it happens to touch, since a path-filtered
+# required check that never fires blocks the PR forever (see the `gate` job
+# below, and docs/github-repo-settings.md).
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-integration:
+    name: Backend integration suite (Playwright)
+    uses: ./.github/workflows/_backend-tests.yml
+    secrets: inherit
+    with:
+      # All 6 test_e2e_playwright_*.py files are @pytest.mark.integration -
+      # target the whole tests dir (not a single file) so admin/app/home/
+      # recordings/translate page coverage actually runs, not just upload.
+      pytest-args: 'voice_transcriber/tests -m integration -q'
+      install-playwright: true
+      job-timeout-minutes: 20
+    # Deliberately gated to Tier 3 only, not every `dev` PR - see
+    # nightly-e2e-dev.yml's header comment for the tradeoff (a nightly run
+    # against `dev` instead) and CONTRIBUTING.md/the branch-model report for
+    # why this was the chosen default rather than the alternative.
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Builds the exact two images the deploy team runs
+      # (docker-compose.prod.yml's `web` and `nginx` services - see that
+      # file and frontend/nginx.conf for how they're routed). `db` is the
+      # stock postgres:16-alpine image, nothing to build there. A broken
+      # Dockerfile - a stale COPY path, a frontend build failure, a
+      # dependency that only resolves on the dev machine - previously
+      # reached the deploy team as a surprise on their first deploy attempt
+      # instead of failing here.
+      - name: Build backend image
+        run: docker build -t zenoscribe-backend:ci .
+
+      - name: Build frontend image
+        run: docker build -f frontend/Dockerfile -t zenoscribe-frontend:ci .
+
+      # Confirms non-root (Dockerfile's USER app) and that no real .env file
+      # leaked into the backend image despite `COPY . /app` - .dockerignore
+      # should have excluded it, this is what actually proves that. Excludes
+      # .env.example/.env.production.example, which .dockerignore
+      # deliberately re-includes and are meant to ship. Frontend's Dockerfile
+      # only ever COPYs frontend/ into its build stage, so it has no
+      # equivalent leak surface to check.
+      - name: Sanity-check the backend image
+        run: |
+          docker run --rm zenoscribe-backend:ci whoami | grep -qx app
+          leaked=$(docker run --rm zenoscribe-backend:ci sh -c \
+            "ls -a /app | grep -E '^\.env' | grep -vE '^\.env\.(production\.)?example\$'" || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::unexpected .env file(s) found inside the built image: $leaked"
+            exit 1
+          fi
+
+      # pip-audit/npm audit (dependency-audit job) cover known-vuln Python/JS
+      # packages; neither touches the python:3.12-slim or nginx:1.27-alpine
+      # base images themselves. Trivy scans each actual built image - OS
+      # packages plus both language ecosystems - for known CVEs.
+      # ignore-unfixed: true so the gate doesn't go permanently red over a
+      # CVE with no available patch yet.
+      - name: Scan backend image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'zenoscribe-backend:ci'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          trivyignores: '.trivyignore'
+
+      - name: Scan frontend image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'zenoscribe-frontend:ci'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          trivyignores: '.trivyignore'
+
+  dependency-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      # Audits only the production dependency set (requirements.txt) - the
+      # set that actually ships in the image - not requirements-dev.txt's
+      # test/lint tooling, which is never deployed.
+      - name: Audit Python production dependencies (pip-audit)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Audit frontend dependencies (npm audit)
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend audit --audit-level=high
+
+  gate:
+    name: Production gate passed
+    if: always()
+    needs: [backend-integration, docker-build, dependency-audit]
+    runs-on: ubuntu-latest
+    # Single required status check for `main` branch protection - see
+    # docs/github-repo-settings.md. This workflow has no `paths:` filter and
+    # no job-level `if:` conditionals, so unlike ci.yml's `gate`, every job
+    # listed above always actually runs (never "skipped") on any push/PR
+    # this workflow triggers on - but the aggregator pattern is kept
+    # identical between the two files for consistency and because it's
+    # cheap insurance against a future conditional job being added here.
+    steps:
+      - name: Verify no upstream job failed or was cancelled
+        run: |
+          echo "${{ join(needs.*.result, ' ') }}" \
+            | tr ' ' '\n' \
+            | grep -qE '^(failure|cancelled)$' && exit 1
+          exit 0
