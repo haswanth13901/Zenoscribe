@@ -111,10 +111,53 @@ jobs:
         run: npm --prefix frontend test
         timeout-minutes: 10
 
+  config-validate:
+    name: Validate compose files & env templates
+    runs-on: ubuntu-latest
+    # No Docker image build, no services: block - just parses YAML/env, so
+    # this stays in Tier 1 despite touching Docker/env concerns. Catches gap
+    # 5/7 from the branch-model audit: neither compose file was ever
+    # validated, and the two .env templates could silently drift from
+    # config.py's actual requirements.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # `docker compose config` also needs the `env_file:` target to
+      # physically exist (a hard file-existence check, separate from - and
+      # not satisfied by - `${VAR}` substitution) - the .example files are
+      # exactly what a fresh clone has, so copy them to the real filenames
+      # Compose expects. Placeholder values only, identical to the .example
+      # content; never a real secret, and this never leaves the ephemeral
+      # CI runner.
+      - name: Stage placeholder env files for Compose to read
+        run: |
+          cp .env.example .env
+          cp .env.production.example .env.production
+
+      - name: Validate docker-compose.yml (dev)
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: Validate docker-compose.prod.yml (prod)
+        # --env-file is what fills in ${POSTGRES_USER} etc. inside the YAML
+        # itself - a separate mechanism from the env_file: staging above.
+        # See docker-compose.prod.yml's own header comment for why both are
+        # needed and why they're not the same thing.
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml config -q
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check .env templates match config.py's fail-fast requirements
+        run: python scripts/check_env_templates.py
+
   gate:
     name: Dev checks passed
     if: always()
-    needs: [backend-lint, backend-fast, frontend-unit]
+    needs: [backend-lint, backend-fast, frontend-unit, config-validate]
     runs-on: ubuntu-latest
     # Single required status check for `dev` branch protection - see
     # docs/github-repo-settings.md. `if: always()` makes this run even when
