@@ -47,6 +47,20 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # ---- Stage: common base for both backend targets below ----
 FROM python:3.12-slim AS app-base
 
+# Baked in at build time via --build-arg (docker-compose.prod.yml,
+# release-gate.yml's docker-build job) so a running container can report
+# what image it actually is via GET /healthz (voice_transcriber/server.py,
+# config.py's APP_VERSION/GIT_SHA). Declared once here, in app-base, so
+# both the `backend` and `backend-with-frontend` targets below inherit the
+# same values instead of duplicating the ARG/ENV/LABEL lines per target.
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+LABEL org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.source="https://github.com/haswanth13901/Zenoscribe"
+
 # python:3.12-slim's own baked-in OS packages lag Debian's security repo -
 # CI's Trivy scan (docker-build job) failed on CVEs in util-linux/bsdutils
 # (already-patched HIGH-severity issues) that were sitting in the base

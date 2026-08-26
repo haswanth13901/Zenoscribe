@@ -237,8 +237,9 @@ if SERVE_FRONTEND:
 @app.get("/healthz")
 async def healthz(response: Response):
     """Liveness + readiness probe for nginx/Compose/monitoring.
-    Unauthenticated by design, but reports nothing beyond ok/degraded - no
-    version, no config - so it's safe to leave open on the public path.
+    Unauthenticated by design. Reports ok/degraded plus which build is
+    running (version/git_sha, baked in at image build time - see
+    config.APP_VERSION/GIT_SHA) - no other config is exposed here.
 
     Checked first, before touching the database at all: once a graceful
     shutdown has started (_shutdown() in this module), this immediately
@@ -247,16 +248,17 @@ async def healthz(response: Response):
     docstring above for why this needs to happen before, not during, the
     session-drain wait.
     """
+    version_fields = {"version": config.APP_VERSION, "git_sha": config.GIT_SHA}
     if not _ready:
         response.status_code = 503
-        return {"status": "shutting_down", "database": "unknown"}
+        return {"status": "shutting_down", "database": "unknown", **version_fields}
     try:
         await asyncio.to_thread(db.ping)
     except Exception:
         log.exception("healthz: database readiness check failed")
         response.status_code = 503
-        return {"status": "degraded", "database": "unreachable"}
-    return {"status": "ok", "database": "ok"}
+        return {"status": "degraded", "database": "unreachable", **version_fields}
+    return {"status": "ok", "database": "ok", **version_fields}
 
 
 @app.get("/api/languages")

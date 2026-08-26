@@ -47,8 +47,17 @@ jobs:
       # dependency that only resolves on the dev machine - previously
       # reached the deploy team as a surprise on their first deploy attempt
       # instead of failing here.
+      # APP_VERSION/GIT_SHA get baked into the image (Dockerfile's app-base
+      # stage) and surfaced at runtime via GET /healthz - see
+      # voice_transcriber/server.py. github.ref_name is the tag name on a
+      # `tags: ['v*']` push, otherwise the branch name; github.sha is
+      # always the full commit SHA being built.
       - name: Build backend image
-        run: docker build -t zenoscribe-backend:ci .
+        run: |
+          docker build \
+            --build-arg APP_VERSION="${{ github.ref_name }}" \
+            --build-arg GIT_SHA="${{ github.sha }}" \
+            -t zenoscribe-backend:ci .
 
       - name: Build frontend image
         run: docker build -f frontend/Dockerfile -t zenoscribe-frontend:ci .
