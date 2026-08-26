@@ -53,11 +53,17 @@ pattern: `dev`.
 ```bash
 gh api repos/{owner}/{repo}/branches/dev/protection \
   --method PUT \
-  --field required_pull_request_reviews='{}' \
+  --field required_pull_request_reviews=null \
   --field required_status_checks='{"strict":true,"contexts":["Dev checks passed"]}' \
   --field enforce_admins=false \
   --field restrictions=null
 ```
+
+`required_pull_request_reviews` must be `null`, not `{}` - an empty object
+still enables the reviews requirement with its default of 1 approving
+review, which blocks every PR on a solo-maintainer repo (nobody else can
+approve, and GitHub doesn't let you approve your own PR). Only `null`
+actually means "no review requirement."
 
 ## 4. Branch protection on `main`
 
@@ -77,7 +83,7 @@ gh api repos/{owner}/{repo}/branches/dev/protection \
 ```bash
 gh api repos/{owner}/{repo}/branches/main/protection \
   --method PUT \
-  --field required_pull_request_reviews='{}' \
+  --field required_pull_request_reviews=null \
   --field required_status_checks='{"strict":true,"contexts":["Production gate passed"]}' \
   --field enforce_admins=false \
   --field required_linear_history=true \
@@ -85,6 +91,10 @@ gh api repos/{owner}/{repo}/branches/main/protection \
   --field allow_deletions=false \
   --field restrictions=null
 ```
+
+Same caveat as §3: `required_pull_request_reviews` must be `null`, not
+`{}`, or it silently requires 1 approval that a solo maintainer can never
+supply.
 
 ## 5. The required-check trap - why only the two aggregators are listed above
 

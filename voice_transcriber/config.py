@@ -28,6 +28,14 @@ load_dotenv(ENV_FILE)
 # Environment mode: 'development' (default), 'testing', or 'production'
 ENV = os.environ.get('ENV', 'development').lower()
 PRODUCTION = ENV == 'production'
+
+# Set via the Dockerfile's ENV APP_VERSION/GIT_SHA (baked in at build time
+# from --build-arg, see docker-compose.prod.yml and release-gate.yml) so a
+# running container can report what image it actually is. Defaults below
+# match the Dockerfile ARG defaults, for running outside a built image
+# (bare `uvicorn` locally, tests).
+APP_VERSION = os.environ.get('APP_VERSION', 'dev')
+GIT_SHA = os.environ.get('GIT_SHA', 'unknown')
 RECORDINGS = BASE_DIR / "recordings"
 RECORDINGS.mkdir(exist_ok=True)
 

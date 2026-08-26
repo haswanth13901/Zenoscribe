@@ -130,7 +130,11 @@ services:
   # waits for this (see its depends_on below) rather than migrating itself -
   # see this file's header comment and SCALABILITY_AUDIT.md finding F4.
   migrate:
-    build: .
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
     env_file:
       - .env.production
     environment:
@@ -146,7 +150,11 @@ services:
     # Backend-only image (Dockerfile's default `backend` target - no
     # frontend baked in). The frontend is the separate `nginx` service
     # below; nginx routes between the two - see frontend/nginx.conf.
-    build: .
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
     env_file:
       - .env.production
     environment:

@@ -41,18 +41,17 @@ env/
 ENV/
 
 # --- Tooling / editors ---
+# Per-developer tooling config, not project config. .claude/ holds Claude Code's
+# tool permissions and machine-specific paths (Windows-only .venv/Scripts entries,
+# literal PIDs from a debugging session) - same category as .vscode/ and .idea/.
+# Untracked as of PR #35; the directory is recreated locally on first run and
+# needs no setup by anyone cloning the repo.
 .vscode/
+.claude/
 .idea/
 *.swp
 .DS_Store
 Thumbs.db
-
-# Machine-specific Claude Code permissions (e.g. Windows-only .venv/Scripts
-# paths, literal PIDs from a debugging session) - these don't belong in the
-# committed .claude/settings.json, which stays cross-platform and repo-wide.
-# Claude Code merges this file in automatically if present; nobody has to
-# create it themselves.
-.claude/settings.local.json
 
 # --- Test / coverage ---
 .pytest_cache/
