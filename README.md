@@ -26,6 +26,15 @@ per user; an admin can see and manage everything.
 - **Date and source filtering** in both the user history drawer and the
   admin console.
 
+## Branching
+
+`dev` is the default branch and where day-to-day work lands; `main` is
+production - every commit there has passed the full release gate and is
+deployable. Both branches carry the identical file set; environment is
+selected by which compose/env file you use, never by which branch you're
+on. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full model, the release
+flow, and the CI tiers.
+
 ## Requirements
 
 - Python 3.10+
