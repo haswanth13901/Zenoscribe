@@ -130,10 +130,141 @@ jobs:
           npm --prefix frontend ci
           npm --prefix frontend audit --audit-level=high
 
+  prod-config-guardrails:
+    name: Production config guardrails
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    # Ordering only, not artifact reuse - `needs:` just means this doesn't
+    # bother running if the base image build already failed. Each job gets
+    # its own fresh runner with no access to another job's local Docker
+    # image store, so this rebuilds the identical image itself below rather
+    # than attempting a save/load handoff for one extra build (~1-2 min)
+    # that isn't worth the added complexity.
+    #
+    # This proves config.py's six import-time `raise RuntimeError` guards
+    # actually fire, using the real built image rather than an in-process
+    # import (which is what the fast suite already covers indirectly via
+    # test_cors.py's production-mode CORS test, without touching the other
+    # five). A failure here means production would boot silently
+    # misconfigured - this job is the single highest-value addition of the
+    # whole branch-model restructure.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t zenoscribe-backend:ci .
+
+      - name: Run guardrail matrix
+        run: |
+          set -u
+
+          # Asserts `docker run` with the given -e overrides on top of a
+          # deliberately-incomplete production env exits non-zero, and that
+          # the failure actually names $2 (not just "some guard fired") -
+          # guards against a case where a DIFFERENT guard fires first for
+          # the wrong reason and this job passes without proving anything.
+          # Dummy values below are throwaway literals, not secrets - never
+          # sourced from repo Secrets, and never echoed beyond what
+          # config.py's own error message already includes.
+          assert_boot_fails() {
+            description="$1"; expected_key="$2"; shift 2
+            echo "::group::$description"
+            set +e
+            output=$(docker run --rm "$@" zenoscribe-backend:ci \
+              python -c "import voice_transcriber.config" 2>&1)
+            status=$?
+            set -e
+            echo "$output"
+            echo "::endgroup::"
+            if [ "$status" -eq 0 ]; then
+              echo "::error::expected boot to FAIL for '$description' (missing/wrong $expected_key), but it exited 0"
+              exit 1
+            fi
+            if ! echo "$output" | grep -q "$expected_key"; then
+              echo "::error::boot failed for '$description' as expected, but the error didn't mention $expected_key - got: $output"
+              exit 1
+            fi
+            echo "OK - correctly refused to boot, citing $expected_key"
+          }
+
+          # A complete, valid production env - each case below starts from
+          # this and knocks out exactly one variable, so a failure can only
+          # be attributed to the guard actually under test.
+          COMPLETE=(
+            -e ENV=production
+            -e DATABASE_URL=postgresql://dummy:dummy@dummy-host:5432/dummy
+            -e SONIOX_API_KEY=dummy-soniox-key
+            -e STORAGE_BACKEND=minio
+            -e MINIO_ACCESS_KEY=dummy-minio-access
+            -e MINIO_SECRET_KEY=dummy-minio-secret
+            -e REDIS_URL=redis://dummy-redis:6379/0
+            -e ALLOW_TEST_HOOKS=false
+          )
+
+          assert_boot_fails "missing DATABASE_URL" "DATABASE_URL" \
+            -e ENV=production \
+            -e SONIOX_API_KEY=dummy-soniox-key \
+            -e STORAGE_BACKEND=minio \
+            -e MINIO_ACCESS_KEY=dummy-minio-access \
+            -e MINIO_SECRET_KEY=dummy-minio-secret \
+            -e REDIS_URL=redis://dummy-redis:6379/0
+
+          assert_boot_fails "missing SONIOX_API_KEY" "SONIOX_API_KEY" \
+            -e ENV=production \
+            -e DATABASE_URL=postgresql://dummy:dummy@dummy-host:5432/dummy \
+            -e STORAGE_BACKEND=minio \
+            -e MINIO_ACCESS_KEY=dummy-minio-access \
+            -e MINIO_SECRET_KEY=dummy-minio-secret \
+            -e REDIS_URL=redis://dummy-redis:6379/0
+
+          assert_boot_fails "STORAGE_BACKEND left at local default" "STORAGE_BACKEND" \
+            -e ENV=production \
+            -e DATABASE_URL=postgresql://dummy:dummy@dummy-host:5432/dummy \
+            -e SONIOX_API_KEY=dummy-soniox-key \
+            -e REDIS_URL=redis://dummy-redis:6379/0
+
+          assert_boot_fails "missing MINIO_ACCESS_KEY/MINIO_SECRET_KEY" "MINIO_ACCESS_KEY" \
+            -e ENV=production \
+            -e DATABASE_URL=postgresql://dummy:dummy@dummy-host:5432/dummy \
+            -e SONIOX_API_KEY=dummy-soniox-key \
+            -e STORAGE_BACKEND=minio \
+            -e REDIS_URL=redis://dummy-redis:6379/0
+
+          assert_boot_fails "missing REDIS_URL" "REDIS_URL" \
+            -e ENV=production \
+            -e DATABASE_URL=postgresql://dummy:dummy@dummy-host:5432/dummy \
+            -e SONIOX_API_KEY=dummy-soniox-key \
+            -e STORAGE_BACKEND=minio \
+            -e MINIO_ACCESS_KEY=dummy-minio-access \
+            -e MINIO_SECRET_KEY=dummy-minio-secret
+
+          assert_boot_fails "ALLOW_TEST_HOOKS enabled in production" "ALLOW_TEST_HOOKS" \
+            -e ENV=production \
+            -e DATABASE_URL=postgresql://dummy:dummy@dummy-host:5432/dummy \
+            -e SONIOX_API_KEY=dummy-soniox-key \
+            -e STORAGE_BACKEND=minio \
+            -e MINIO_ACCESS_KEY=dummy-minio-access \
+            -e MINIO_SECRET_KEY=dummy-minio-secret \
+            -e REDIS_URL=redis://dummy-redis:6379/0 \
+            -e ALLOW_TEST_HOOKS=true
+
+          echo "::group::complete production env - must boot cleanly"
+          docker run --rm "${COMPLETE[@]}" zenoscribe-backend:ci \
+            python -c "import voice_transcriber.config"
+          status=$?
+          echo "::endgroup::"
+          if [ "$status" -ne 0 ]; then
+            echo "::error::a complete, valid production env still failed to import config.py - this job is testing nothing until this is fixed"
+            exit 1
+          fi
+          echo "OK - complete production env boots cleanly"
+
   gate:
     name: Production gate passed
     if: always()
-    needs: [backend-integration, docker-build, dependency-audit]
+    needs: [backend-integration, docker-build, dependency-audit, prod-config-guardrails]
     runs-on: ubuntu-latest
     # Single required status check for `main` branch protection - see
     # docs/github-repo-settings.md. This workflow has no `paths:` filter and
