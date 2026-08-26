@@ -154,10 +154,48 @@ jobs:
       - name: Check .env templates match config.py's fail-fast requirements
         run: python scripts/check_env_templates.py
 
+  dev-image-build:
+    name: Dev image build (backend-with-frontend + frontend dev stage)
+    runs-on: ubuntu-latest
+    # Tier 2: only meaningful for dev-branch work, not a production push -
+    # release-gate.yml's docker-build job already covers the prod targets
+    # (Dockerfile's default `backend` target, frontend/Dockerfile's nginx
+    # stage) on every main push/PR. Before this job existed, NEITHER dev
+    # target (backend-with-frontend, frontend/Dockerfile's `dev` stage) was
+    # ever built by CI at all - both could break silently.
+    #
+    # This `if:` is what makes this job Tier 2 instead of Tier 1 despite
+    # living in the same trigger scope as the jobs above: on a `main` push
+    # (which this workflow's own triggers also match, for Tier 1's sake)
+    # this evaluates false and the job reports "skipped" - the gate job
+    # below treats that as acceptable, not a required-check trap (see that
+    # job's comment).
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build dev backend image (backend-with-frontend target)
+        run: docker build --target backend-with-frontend -t zenoscribe-backend-dev:ci .
+
+      - name: Build dev frontend image (Vite dev-server stage)
+        run: docker build -f frontend/Dockerfile --target dev -t zenoscribe-frontend-dev:ci .
+
+      - name: Confirm the dev backend image has the baked SPA
+        run: docker run --rm zenoscribe-backend-dev:ci test -f /app/frontend/dist/index.html
+
+      - name: Confirm the dev backend image still runs non-root
+        run: docker run --rm zenoscribe-backend-dev:ci whoami | grep -qx app
+        # No Trivy scan here, deliberately - see this file's header comment:
+        # neither dev image ships, so scanning them only doubles this job's
+        # runtime to gate an artifact nobody deploys. Tier 3's docker-build
+        # job already Trivy-scans the two images that actually ship.
+
   gate:
     name: Dev checks passed
     if: always()
-    needs: [backend-lint, backend-fast, frontend-unit, config-validate]
+    needs: [backend-lint, backend-fast, frontend-unit, config-validate, dev-image-build]
     runs-on: ubuntu-latest
     # Single required status check for `dev` branch protection - see
     # docs/github-repo-settings.md. `if: always()` makes this run even when
