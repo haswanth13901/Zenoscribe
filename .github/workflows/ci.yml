@@ -1,7 +1,19 @@
 name: CI
 
+# Tier 1 (fast checks, ~5 min) + Tier 2 (dev-image-parity checks) - see
+# CONTRIBUTING.md's CI section for the full four-tier model. Tier 1 runs on
+# every push to `dev`/`main` and every PR into `dev`; Tier 2 only on `dev`
+# work (see each job's own `if:`, since GitHub Actions has no
+# per-job-per-branch trigger syntax - the workflow-level trigger below is
+# already the union of what both tiers need).
+#
+# Tier 3 (release gate: docker-build, backend-integration, dependency-audit,
+# prod-config-guardrails) lives in release-gate.yml instead, gated on `main`
+# only - see that file for why. Tier 4 (scheduled vulnerability re-scan)
+# lives in scheduled-audit.yml.
 on:
   push:
+    branches: [dev, main]
     paths:
       - 'voice_transcriber/**'
       - 'frontend/**'
@@ -11,9 +23,18 @@ on:
       - 'requirements-dev.txt'
       - 'pytest.ini'
       - 'Dockerfile'
+      - 'docker-compose.yml'
       - 'docker-compose.prod.yml'
+      - '.dockerignore'
+      - 'scripts/**'
+      - '.trivyignore'
+      - '.env.example'
+      - '.env.production.example'
+      - '.github/dependabot.yml'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/_backend-tests.yml'
   pull_request:
+    branches: [dev]
     paths:
       - 'voice_transcriber/**'
       - 'frontend/**'
@@ -23,8 +44,16 @@ on:
       - 'requirements-dev.txt'
       - 'pytest.ini'
       - 'Dockerfile'
+      - 'docker-compose.yml'
       - 'docker-compose.prod.yml'
+      - '.dockerignore'
+      - 'scripts/**'
+      - '.trivyignore'
+      - '.env.example'
+      - '.env.production.example'
+      - '.github/dependabot.yml'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/_backend-tests.yml'
 
 jobs:
   backend-lint:
@@ -51,142 +80,14 @@ jobs:
 
   backend-fast:
     name: Backend fast suite (pytest)
-    runs-on: ubuntu-latest
-    # This job's Postgres container is destroyed at the end of every run -
-    # these are not real secrets, but pulled from repo-level Actions
-    # Variables/Secrets (Settings -> Secrets and variables -> Actions)
-    # instead of inline literals so the value exists in exactly one place
-    # (repeated identically in backend-integration below). Requires
-    # CI_POSTGRES_USER/CI_POSTGRES_DB (Variables) and CI_POSTGRES_PASSWORD
-    # (Secret) to be configured in the repo - see README.md's CI section.
-    services:
-      db:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: ${{ vars.CI_POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ vars.CI_POSTGRES_DB }}
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER }}"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER }}:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/${{ vars.CI_POSTGRES_DB }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        run: |
-          npm --prefix frontend ci
-          npm --prefix frontend run build
-
-      # -m "not integration and not real_network" is pytest.ini's default
-      # (addopts), so this is every isolated unit/API test - no browser, no
-      # live server subprocess, no real Soniox network calls.
-      - name: Run fast suite
-        run: python -m pytest -q
-        timeout-minutes: 10
-
-  backend-integration:
-    name: Backend integration suite (Playwright)
-    runs-on: ubuntu-latest
-    # Same repo-level Variables/Secrets as backend-fast above - see that
-    # job's comment.
-    services:
-      db:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: ${{ vars.CI_POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ vars.CI_POSTGRES_DB }}
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER }}"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-      # live_server (conftest.py) launches a real uvicorn subprocess, unlike
-      # backend-fast's in-process TestClient (which uses a fakeredis stand-in
-      # via the isolated_redis fixture - see rate_limit.py) - that subprocess
-      # needs an actual Redis reachable at config.py's default REDIS_URL
-      # (redis://localhost:6379/0) for rate limiting to work at all.
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER }}:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/${{ vars.CI_POSTGRES_DB }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # playwright and pytest-playwright are already pinned in
-          # requirements-dev.txt; this just makes that explicit/resilient to
-          # it moving out of there later.
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install pytest-playwright requests
-
-      - name: Install Playwright browsers
-        run: python -m playwright install --with-deps chromium
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        run: |
-          npm --prefix frontend ci
-          npm --prefix frontend run build
-
-      # All 6 test_e2e_playwright_*.py files are @pytest.mark.integration -
-      # target the whole tests dir (not a single file) so admin/app/home/
-      # recordings/translate page coverage actually runs in CI, not just
-      # upload.
-      - name: Run Playwright E2E tests
-        run: python -m pytest voice_transcriber/tests -m integration -q
-        timeout-minutes: 20
+    uses: ./.github/workflows/_backend-tests.yml
+    secrets: inherit
+    with:
+      # pytest.ini's own addopts ("-m not integration and not real_network")
+      # already excludes the E2E/real-network suites - no explicit -m needed.
+      pytest-args: '-q'
+      install-playwright: false
+      job-timeout-minutes: 10
 
   frontend-unit:
     name: Frontend unit tests (Vitest)
@@ -210,101 +111,23 @@ jobs:
         run: npm --prefix frontend test
         timeout-minutes: 10
 
-  docker-build:
-    name: Docker image build
+  gate:
+    name: Dev checks passed
+    if: always()
+    needs: [backend-lint, backend-fast, frontend-unit]
     runs-on: ubuntu-latest
-
+    # Single required status check for `dev` branch protection - see
+    # docs/github-repo-settings.md. `if: always()` makes this run even when
+    # an upstream job reported "skipped" rather than "success" (this
+    # workflow's own `paths:` filter above means any job here can
+    # legitimately never queue for a given push/PR); the grep below treats
+    # "skipped" as fine but "failure"/"cancelled" as fatal. This exists
+    # specifically so a conditional or path-filtered job can never leave a
+    # required check stuck pending forever.
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Builds the exact two images the deploy team runs
-      # (docker-compose.prod.yml's `web` and `nginx` services - see that
-      # file and frontend/nginx.conf for how they're routed). `db` is the
-      # stock postgres:16-alpine image, nothing to build there. A broken
-      # Dockerfile - a stale COPY path, a frontend build failure, a
-      # dependency that only resolves on the dev machine - previously
-      # reached the deploy team as a surprise on their first deploy attempt
-      # instead of failing here.
-      - name: Build backend image
-        run: docker build -t zenoscribe-backend:ci .
-
-      - name: Build frontend image
-        run: docker build -f frontend/Dockerfile -t zenoscribe-frontend:ci .
-
-      # Confirms non-root (Dockerfile's USER app) and that no real .env file
-      # leaked into the backend image despite `COPY . /app` - .dockerignore
-      # should have excluded it, this is what actually proves that. Excludes
-      # .env.example/.env.production.example, which .dockerignore
-      # deliberately re-includes and are meant to ship. Frontend's Dockerfile
-      # only ever COPYs frontend/ into its build stage, so it has no
-      # equivalent leak surface to check.
-      - name: Sanity-check the backend image
+      - name: Verify no upstream job failed or was cancelled
         run: |
-          docker run --rm zenoscribe-backend:ci whoami | grep -qx app
-          leaked=$(docker run --rm zenoscribe-backend:ci sh -c \
-            "ls -a /app | grep -E '^\.env' | grep -vE '^\.env\.(production\.)?example\$'" || true)
-          if [ -n "$leaked" ]; then
-            echo "::error::unexpected .env file(s) found inside the built image: $leaked"
-            exit 1
-          fi
-
-      # pip-audit/npm audit (dependency-audit job) cover known-vuln Python/JS
-      # packages; neither touches the python:3.12-slim or nginx:1.27-alpine
-      # base images themselves. Trivy scans each actual built image - OS
-      # packages plus both language ecosystems - for known CVEs.
-      # ignore-unfixed: true so the gate doesn't go permanently red over a
-      # CVE with no available patch yet.
-      - name: Scan backend image for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: 'zenoscribe-backend:ci'
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          ignore-unfixed: true
-          trivyignores: '.trivyignore'
-
-      - name: Scan frontend image for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: 'zenoscribe-frontend:ci'
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          ignore-unfixed: true
-          trivyignores: '.trivyignore'
-
-  dependency-audit:
-    name: Dependency vulnerability audit
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      # Audits only the production dependency set (requirements.txt) - the
-      # set that actually ships in the image - not requirements-dev.txt's
-      # test/lint tooling, which is never deployed.
-      - name: Audit Python production dependencies (pip-audit)
-        run: |
-          python -m pip install --upgrade pip pip-audit
-          pip-audit -r requirements.txt
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Audit frontend dependencies (npm audit)
-        run: |
-          npm --prefix frontend ci
-          npm --prefix frontend audit --audit-level=high
+          echo "${{ join(needs.*.result, ' ') }}" \
+            | tr ' ' '\n' \
+            | grep -qE '^(failure|cancelled)$' && exit 1
+          exit 0
