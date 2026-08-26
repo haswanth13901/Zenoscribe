@@ -1,0 +1,14 @@
+# Default owner for everything not matched below
+* @haswanth13901
+
+# CI/CD and repo governance
+/.github/ @haswanth13901
+
+# Database migrations
+/alembic/ @haswanth13901
+
+# Production deployment topology
+docker-compose.prod.yml @haswanth13901
+
+# Auth
+voice_transcriber/auth.py @haswanth13901

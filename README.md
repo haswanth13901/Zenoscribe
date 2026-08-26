@@ -1,5 +1,9 @@
 # Zenoscribe
 
+[![CI](https://github.com/haswanth13901/Zenoscribe/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/haswanth13901/Zenoscribe/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+
 > Every voice, clearly attributed.
 
 Real-time speech-to-text with speaker diarization, a multi-user web UI, and an
