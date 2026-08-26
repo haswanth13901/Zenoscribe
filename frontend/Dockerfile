@@ -30,7 +30,7 @@ EXPOSE 8000
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 # ---- Stage 2: serve it ----
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 
 # nginx:1.27-alpine's own baked-in Alpine packages lag its security repo -
 # CI's Trivy scan (docker-build job) found dozens of already-patched
