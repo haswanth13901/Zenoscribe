@@ -35,25 +35,16 @@ on:
       - '.github/workflows/_backend-tests.yml'
   pull_request:
     branches: [dev]
-    paths:
-      - 'voice_transcriber/**'
-      - 'frontend/**'
-      - 'alembic/**'
-      - 'alembic.ini'
-      - 'requirements.txt'
-      - 'requirements-dev.txt'
-      - 'pytest.ini'
-      - 'Dockerfile'
-      - 'docker-compose.yml'
-      - 'docker-compose.prod.yml'
-      - '.dockerignore'
-      - 'scripts/**'
-      - '.trivyignore'
-      - '.env.example'
-      - '.env.production.example'
-      - '.github/dependabot.yml'
-      - '.github/workflows/ci.yml'
-      - '.github/workflows/_backend-tests.yml'
+    # No `paths:` filter here, deliberately - unlike the `push` trigger
+    # above. A path-filtered workflow never queues at all when the PR
+    # touches no matching file, and GitHub treats a required status check
+    # that never reports as pending forever, permanently blocking the PR
+    # (see docs/github-repo-settings.md §5). A docs/governance-only PR -
+    # LICENSE, CHANGELOG.md, CONTRIBUTING.md, README.md, .github/
+    # templates - matches nothing in the list above and would hang with
+    # `dev` branch protection enabled. Tier 1 is ~5 minutes; cheap enough
+    # to run on every PR regardless of what it touches. release-gate.yml
+    # omits `paths:` entirely for exactly the same reason.
 
 jobs:
   backend-lint:
@@ -199,12 +190,11 @@ jobs:
     runs-on: ubuntu-latest
     # Single required status check for `dev` branch protection - see
     # docs/github-repo-settings.md. `if: always()` makes this run even when
-    # an upstream job reported "skipped" rather than "success" (this
-    # workflow's own `paths:` filter above means any job here can
-    # legitimately never queue for a given push/PR); the grep below treats
-    # "skipped" as fine but "failure"/"cancelled" as fatal. This exists
-    # specifically so a conditional or path-filtered job can never leave a
-    # required check stuck pending forever.
+    # an upstream job reported "skipped" rather than "success":
+    # dev-image-build's own `if:` evaluates false on a `main` push and
+    # reports "skipped", not "success". The grep below treats "skipped" as
+    # acceptable but "failure"/"cancelled" as fatal, so a conditional job
+    # can never leave a required check stuck pending forever.
     steps:
       - name: Verify no upstream job failed or was cancelled
         run: |
