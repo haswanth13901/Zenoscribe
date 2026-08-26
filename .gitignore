@@ -47,6 +47,13 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Machine-specific Claude Code permissions (e.g. Windows-only .venv/Scripts
+# paths, literal PIDs from a debugging session) - these don't belong in the
+# committed .claude/settings.json, which stays cross-platform and repo-wide.
+# Claude Code merges this file in automatically if present; nobody has to
+# create it themselves.
+.claude/settings.local.json
+
 # --- Test / coverage ---
 .pytest_cache/
 .coverage

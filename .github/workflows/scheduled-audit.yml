@@ -1,0 +1,93 @@
+name: Scheduled dependency & image audit
+
+# Tier 4 of the branch model (see CONTRIBUTING.md's CI section): a CVE
+# disclosed against an unchanged dependency should turn the repo red without
+# waiting for someone to push. release-gate.yml's dependency-audit/Trivy
+# scans only run on a `main` push/PR/tag - between releases, nothing
+# re-checks an already-shipped dependency against newly-disclosed CVEs. This
+# pairs with Dependabot (.github/dependabot.yml, weekly version-bump PRs)
+# rather than duplicating it: Dependabot proposes the fix, this job is what
+# notices there's something to fix in the first place even if nobody has
+# touched the repo that week.
+#
+# Explicitly pinned to `main`, not left to default-branch behavior:
+# `schedule:`-triggered runs use this workflow file's content as found on
+# the default branch, and actions/checkout would otherwise also default to
+# that same ref - once the default branch is `dev` (see
+# docs/github-repo-settings.md), that default would silently start auditing
+# the wrong branch. `ref: main` below is what keeps this auditing what's
+# actually deployed regardless of which branch is marked default.
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # 06:00 UTC every Monday
+  workflow_dispatch: {}    # manual trigger, e.g. to test this workflow itself
+
+jobs:
+  dependency-audit:
+    name: Dependency vulnerability audit (scheduled)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Audit Python production dependencies (pip-audit)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Audit frontend dependencies (npm audit)
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend audit --audit-level=high
+
+  image-scan:
+    name: Container image vulnerability scan (scheduled)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Build backend image
+        run: docker build -t zenoscribe-backend:ci .
+
+      - name: Build frontend image
+        run: docker build -f frontend/Dockerfile -t zenoscribe-frontend:ci .
+
+      - name: Scan backend image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'zenoscribe-backend:ci'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          trivyignores: '.trivyignore'
+
+      - name: Scan frontend image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'zenoscribe-frontend:ci'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          trivyignores: '.trivyignore'

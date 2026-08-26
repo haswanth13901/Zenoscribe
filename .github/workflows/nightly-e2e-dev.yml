@@ -1,0 +1,39 @@
+name: Nightly E2E (dev)
+
+# See ci.yml/release-gate.yml and CONTRIBUTING.md's CI section for the full
+# four-tier model - this file exists for a deliberate tradeoff: the
+# Playwright E2E suite (backend-integration) only runs against `main` in
+# release-gate.yml's Tier 3 gate, not on every `dev` PR, since it's a real
+# ~15-20 minute job (headless Chromium + a live uvicorn subprocess +
+# Postgres + Redis) that would slow the everyday dev loop considerably for a
+# suite that changes far less often than unit tests do. This nightly run
+# against `dev` is the compromise: a regression introduced during the day
+# surfaces by the next morning instead of only at the next release PR into
+# `main`.
+#
+# Not a required check anywhere - purely a notification signal (failures
+# show up in the Actions tab / notifications, nothing blocks on this). If
+# the team would rather have same-day signal at the cost of a slower `dev`
+# PR loop, move this job into ci.yml's job list instead and delete this
+# file - flagged as an explicit open decision in the branch-model report,
+# not settled here.
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC nightly
+  workflow_dispatch: {}   # manual trigger, e.g. to test this workflow itself
+
+jobs:
+  backend-integration-nightly:
+    name: Backend integration suite (Playwright) - nightly against dev
+    # Scheduled/manually-dispatched runs use this workflow file's content as
+    # found on the repo's default branch, and actions/checkout (inside the
+    # reusable workflow this calls) follows that same ref by default with no
+    # override needed here - once the default branch is `dev` (see
+    # docs/github-repo-settings.md), that's exactly the branch this job is
+    # meant to test.
+    uses: ./.github/workflows/_backend-tests.yml
+    secrets: inherit
+    with:
+      pytest-args: 'voice_transcriber/tests -m integration -q'
+      install-playwright: true
+      job-timeout-minutes: 20

@@ -1,0 +1,107 @@
+name: Reusable - backend test job
+
+# Shared by ci.yml's backend-fast job and release-gate.yml's
+# backend-integration job - both need an identical Postgres service, Python
+# setup, and frontend build (several fast-suite route tests depend on
+# frontend/dist/ existing so server.py's SERVE_FRONTEND check is true), and
+# previously duplicated all of that inline in ci.yml. Redis runs
+# unconditionally even though the fast suite doesn't touch it directly (it
+# uses conftest.py's in-process fakeredis stand-in, isolated_redis fixture) -
+# a second idle service container costs nothing meaningful and keeps this
+# file to one shape instead of two near-identical ones.
+on:
+  workflow_call:
+    inputs:
+      pytest-args:
+        description: >-
+          Args passed to `python -m pytest` - e.g. "-q" (fast suite, relies
+          on pytest.ini's addopts default of "-m not integration and not
+          real_network") or "voice_transcriber/tests -m integration -q"
+          (the Playwright E2E suite, overriding that default explicitly).
+        required: true
+        type: string
+      install-playwright:
+        description: 'Install Playwright + Chromium first - only the E2E suite needs this.'
+        required: false
+        type: boolean
+        default: false
+      job-timeout-minutes:
+        required: false
+        type: number
+        default: 10
+
+jobs:
+  test:
+    name: ${{ inputs.install-playwright && 'Backend integration suite (Playwright)' || 'Backend fast suite (pytest)' }}
+    runs-on: ubuntu-latest
+    # Not real secrets - this Postgres container is destroyed at the end of
+    # every run - but pulled from repo-level Actions Variables/Secrets
+    # (Settings -> Secrets and variables -> Actions) instead of inline
+    # literals so the value exists in exactly one place shared by both call
+    # sites, not duplicated per caller. Requires CI_POSTGRES_USER/
+    # CI_POSTGRES_DB (Variables) and CI_POSTGRES_PASSWORD (Secret) - see
+    # docs/github-repo-settings.md.
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ${{ vars.CI_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ vars.CI_POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # Only backend-integration actually needs this (live_server, conftest.py,
+      # launches a real uvicorn subprocess that needs a real Redis reachable
+      # for rate limiting to work at all) - see this file's header comment
+      # for why it's unconditional rather than input-gated.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER }}:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/${{ vars.CI_POSTGRES_DB }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Install Playwright browsers
+        if: inputs.install-playwright
+        run: python -m playwright install --with-deps chromium
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+
+      - name: Run pytest
+        run: python -m pytest ${{ inputs.pytest-args }}
+        timeout-minutes: ${{ inputs.job-timeout-minutes }}

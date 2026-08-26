@@ -1,14 +1,21 @@
 version: 2
+
+# Every entry below targets `dev`, not `main` (the repo default) - dependency
+# PRs land in dev like any other change and reach main only through a
+# release PR (dev -> main), never bumping main directly out from under
+# whatever's about to be deployed. See CONTRIBUTING.md's "Release flow".
 updates:
   # requirements.txt (production) and requirements-dev.txt (test/lint tooling)
   - package-ecosystem: "pip"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
 
   # frontend/package.json - React + Redux Toolkit SPA
   - package-ecosystem: "npm"
     directory: "/frontend"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
 
@@ -17,6 +24,7 @@ updates:
   # pinned; this opens the PR to bump the pin itself.
   - package-ecosystem: "docker"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
 
@@ -26,12 +34,14 @@ updates:
   # separate from the root Dockerfile above.
   - package-ecosystem: "docker"
     directory: "/frontend"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
 
-  # Actions pinned in .github/workflows/ci.yml (actions/checkout,
+  # Actions pinned across .github/workflows/*.yml (actions/checkout,
   # actions/setup-python, aquasecurity/trivy-action, etc).
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
