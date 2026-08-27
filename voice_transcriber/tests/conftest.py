@@ -100,7 +100,13 @@ def isolated_redis(monkeypatch):
     fake = fakeredis.FakeRedis()
     monkeypatch.setattr(redis_client, "_client", fake)
     monkeypatch.setattr(rate_limit, "_script", None)
+    # A test that simulates a Redis outage leaves rate_limit's dev fallback
+    # circuit open for _FALLBACK_RETRY_SEC; without clearing it here the
+    # next test would silently count against in-memory state instead of
+    # this fresh fakeredis.
+    rate_limit._reset_fallback_state()
     yield fake
+    rate_limit._reset_fallback_state()
     fake.flushall()
 
 
