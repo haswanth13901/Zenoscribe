@@ -19,7 +19,7 @@ python-multipart==0.0.32
 pydantic==2.13.4
 
 # Database (Postgres) & migrations
-psycopg[binary,pool]==3.2.10
+psycopg[binary,pool]==3.3.4
 alembic==1.17.1
 # Pinned explicitly, not left to alembic's own transitive pin - alembic/env.py
 # and every migration file import it directly (`sa.Column` etc.), and it runs
