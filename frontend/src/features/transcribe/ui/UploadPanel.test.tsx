@@ -94,7 +94,9 @@ describe("UploadPanel", () => {
 
   it("Reset clears the selected file and the transcription result", async () => {
     server.use(
-      http.post("/api/transcribe/translate", () => HttpResponse.json({ turns: [{ text: "hello world" }] })),
+      http.post("/api/transcribe/translate", () =>
+        HttpResponse.json({ turns: [{ text: "hello world" }] }),
+      ),
     );
     renderPanel();
     await pickFile();

@@ -212,7 +212,10 @@ export function TranslatePage(): ReactElement {
             </select>
           </div>
 
-          <div className={styles.field} title="Optional hint for how many distinct voices to expect">
+          <div
+            className={styles.field}
+            title="Optional hint for how many distinct voices to expect"
+          >
             <label htmlFor="translate-num-speakers">Speakers</label>
             <input
               id="translate-num-speakers"
@@ -324,9 +327,8 @@ export function TranslatePage(): ReactElement {
           data-testid="translate-background-warning"
           role="status"
         >
-          This tab is in the background or your screen is locked — some
-          mobile browsers pause the session here. Keep this tab open and
-          visible to avoid losing audio.
+          This tab is in the background or your screen is locked — some mobile browsers pause the
+          session here. Keep this tab open and visible to avoid losing audio.
         </div>
       )}
 
