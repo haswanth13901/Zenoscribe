@@ -8,7 +8,7 @@
 # docker-compose.prod.yml's `nginx.build`.
 
 # ---- Stage 1: build the SPA ----
-FROM node:20-slim AS build
+FROM node:25-slim AS build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -21,7 +21,7 @@ RUN npm run build
 # --prefix frontend run dev`). Not used by production or by Stage 2 below -
 # entirely independent of the `build` stage above, since dev serves
 # frontend/src/ live rather than a compiled dist/. ----
-FROM node:20-slim AS dev
+FROM node:25-slim AS dev
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
