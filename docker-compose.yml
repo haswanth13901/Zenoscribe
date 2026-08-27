@@ -28,11 +28,13 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Required unconditionally (not just for STORAGE_BACKEND=minio): rate
-  # limiting has no in-memory fallback any more - see rate_limit.py and
-  # SCALABILITY_AUDIT.md finding F2. STORAGE_BACKEND stays "local" by
-  # default in dev (see .env.example), so `minio` below is opt-in, but
-  # `redis` is not.
+  # Wanted by default (not just for STORAGE_BACKEND=minio): it's what rate
+  # limiting counts in, and the only implementation that stays correct
+  # across replicas - see rate_limit.py and SCALABILITY_AUDIT.md finding F2.
+  # A local run without it still works (the limiter degrades to
+  # process-local counters outside production); production has no such
+  # fallback. STORAGE_BACKEND stays "local" by default in dev (see
+  # .env.example), so `minio` below is opt-in.
   redis:
     image: redis:7-alpine
     # Published to the host - same reasoning as db's `ports:` above.

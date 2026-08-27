@@ -56,9 +56,9 @@ Prerequisites
 - Git
 - A modern browser (Chrome/Edge/Firefox)
 - Postgres (local install, or via `docker compose up db`)
-- Redis (local install, or via `docker compose up redis`) — required, not
-  optional: rate limiting has no in-memory fallback any more (see
-  "Data & storage" below)
+- Redis (local install, or via `docker compose up redis`) — required in
+  production, recommended locally: without it, rate limiting falls back to
+  process-local counters and logs a warning (see "Data & storage" below)
 
 1) Install dependencies
 
@@ -91,8 +91,9 @@ SONIOX_API_KEY=
 # in development/testing but should not be used in deployed environments.
 JWT_SECRET=
 
-# Redis connection string - required (rate limiting has no in-memory
-# fallback). Defaults to the `redis` service in docker-compose.yml.
+# Redis connection string - required in production; locally the limiter
+# falls back to in-memory counters if it's unreachable. Defaults to the
+# `redis` service in docker-compose.yml.
 REDIS_URL=redis://localhost:6379/0
 
 # Initial admin account (set a strong password in production)
@@ -781,8 +782,12 @@ All in `config.py`:
 - **Redis** — rate-limit counters only (`rate_limit.py`), never durable data.
   Connection configured via `REDIS_URL` (see `.env.example`); for local dev
   this points at the `redis` service in `docker-compose.yml`. Losing Redis
-  (restart, outage) never loses data - rate limiting fails closed (503) until
-  it's back, rather than silently allowing unlimited requests through.
+  (restart, outage) never loses data - in production, rate limiting fails
+  closed (503) until it's back, rather than silently allowing unlimited
+  requests through. Outside production it instead falls back to
+  process-local counters (accurate for a single dev process, and no use
+  across replicas - which is why production doesn't do it), retrying Redis
+  every 30s so shared counters resume on their own.
 - **Recording storage** (`voice_transcriber/storage/`) — audio + transcript
   objects, addressed by an opaque key (`users/{user_id}/recordings/{id}.wav`
   etc.), never a raw filesystem path. Two backends:

@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from redis import RedisError
 
-from voice_transcriber import rate_limit
+from voice_transcriber import config, rate_limit
 
 
 @pytest.fixture(autouse=True)
@@ -58,13 +58,62 @@ def test_rejected_hits_are_not_themselves_counted(isolated_redis):
     assert isolated_redis.zcard("ratelimit:k") == 1
 
 
-def test_hit_raises_rate_limiter_unavailable_when_redis_down(monkeypatch):
+def _break_redis(monkeypatch):
+    """Makes every Redis call raise, as an unreachable server would."""
     def _raise(*a, **kw):
         raise RedisError("simulated redis outage")
 
     monkeypatch.setattr(rate_limit, "_get_script", lambda: _raise)
+
+
+def test_hit_raises_rate_limiter_unavailable_when_redis_down_in_production(monkeypatch):
+    # Production fails closed - no in-memory fallback, because counters that
+    # aren't shared across replicas aren't a rate limit (SCALABILITY_AUDIT.md
+    # finding F2).
+    monkeypatch.setattr(config, "PRODUCTION", True)
+    _break_redis(monkeypatch)
     with pytest.raises(rate_limit.RateLimiterUnavailable):
         rate_limit.hit("k", 1, 60)
+
+
+def test_hit_falls_back_to_in_memory_counters_when_redis_down_in_dev(monkeypatch):
+    # Outside production a dead Redis must not turn every request into a
+    # 503 - a bare local `uvicorn` run has nothing to share counters with
+    # anyway. The limit is still enforced, just process-locally.
+    assert config.PRODUCTION is False
+    _break_redis(monkeypatch)
+    assert rate_limit.hit("k", 2, 60) is True
+    assert rate_limit.hit("k", 2, 60) is True
+    assert rate_limit.hit("k", 2, 60) is False
+    # Independent budgets survive the fallback path too.
+    assert rate_limit.hit("other", 2, 60) is True
+
+
+def test_dev_fallback_logs_once_per_outage_window_not_once_per_request(monkeypatch, caplog):
+    _break_redis(monkeypatch)
+    with caplog.at_level("WARNING", logger="rate_limit"):
+        for _ in range(10):
+            rate_limit.hit("k", 100, 60)
+    assert len(caplog.records) == 1
+
+
+def test_dev_fallback_returns_to_redis_once_it_is_reachable_again(monkeypatch, isolated_redis):
+    now = [1000.0]
+    monkeypatch.setattr(rate_limit.time, "time", lambda: now[0])
+    real_get_script = rate_limit._get_script
+
+    _break_redis(monkeypatch)
+    assert rate_limit.hit("k", 1, 60) is True  # served from memory
+
+    # Redis comes back, but the circuit stays open until the retry window
+    # elapses - no probing Redis on every single request while it's down.
+    monkeypatch.setattr(rate_limit, "_get_script", real_get_script)
+    assert rate_limit.hit("k", 1, 60) is False  # still the in-memory counter
+    assert isolated_redis.zcard("ratelimit:k") == 0
+
+    now[0] += rate_limit._FALLBACK_RETRY_SEC + 1
+    assert rate_limit.hit("k", 1, 60) is True  # shared counters resume
+    assert isolated_redis.zcard("ratelimit:k") == 1
 
 
 async def test_per_user_dependency_raises_429_once_exceeded():
