@@ -17,7 +17,7 @@
 # since the browser captures audio in that path)
 sounddevice==0.5.5
 numpy==2.5.1
-scipy==1.18.0
+scipy==1.18.1
 
 # Testing & E2E
 pytest==9.1.1
