@@ -39,6 +39,44 @@ gh secret set CI_POSTGRES_PASSWORD   # prompts for the value
 These are CI-only, ephemeral, destroyed with the container at the end of
 every run - not production credentials.
 
+### 2a. Dependabot reads from a second, separate secret store
+
+`gh secret set CI_POSTGRES_PASSWORD` writes to the **Actions** store only.
+Workflow runs triggered by Dependabot do not read that store - GitHub hands
+them a separate, restricted **Dependabot** secret store instead. The same
+secret name has to exist in both, or every Dependabot PR fails:
+
+```bash
+gh secret set CI_POSTGRES_PASSWORD --app dependabot   # prompts for the value
+gh secret list --app dependabot                       # verify it took
+```
+
+**UI:** same page as above (Settings -> Secrets and variables -> Actions),
+but the **Dependabot** tab in the left sidebar rather than the Actions tab.
+
+**Variables are unaffected.** There is only one variables store - `gh
+variable` has no `--app` flag at all - and Dependabot-triggered runs read
+`vars.CI_POSTGRES_USER` / `vars.CI_POSTGRES_DB` normally. Only `secrets.*`
+is split in two.
+
+**Failure signature.** Without the Dependabot copy, `secrets.CI_POSTGRES_PASSWORD`
+resolves to an empty string in `_backend-tests.yml`, so the Postgres service
+container refuses to initialize and the job dies at ~18s, before a single
+test runs:
+
+```
+Database is uninitialized and superuser password is not specified.
+You must specify POSTGRES_PASSWORD to a non-empty value for the
+superuser.
+```
+
+What makes this one expensive to diagnose is that it surfaces as a service
+healthcheck timeout, which reads like a flaky runner. It is not flaky: it
+fails 100% of the time on Dependabot PRs and passes 100% of the time on
+human PRs off the same commit range - that split is the tell. Missing it
+silently blocked the entire dependency queue here (nine PRs sat unmergeable
+and it looked like neglect, not a CI gap).
+
 ## 3. Branch protection on `dev`
 
 **UI:** Settings -> Branches -> Add branch protection rule -> Branch name
