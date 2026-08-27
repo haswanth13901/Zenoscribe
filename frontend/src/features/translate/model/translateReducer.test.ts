@@ -170,7 +170,12 @@ describe("translateReducer", () => {
         ts: 2000,
       });
       expect(state.utterances).toHaveLength(1);
-      expect(state.utterances[0]).toMatchObject({ source: "", translation: "", live: true, ts: 1000 });
+      expect(state.utterances[0]).toMatchObject({
+        source: "",
+        translation: "",
+        live: true,
+        ts: 1000,
+      });
     });
   });
 

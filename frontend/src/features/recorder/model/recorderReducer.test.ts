@@ -154,7 +154,12 @@ describe("recorderReducer", () => {
 
   it("reconnected returns to listening and clears reconnecting", () => {
     const state = recorderReducer(
-      { ...initialRecorderState, status: "listening", reconnecting: true, statusMessage: "reconnecting (attempt 3)…" },
+      {
+        ...initialRecorderState,
+        status: "listening",
+        reconnecting: true,
+        statusMessage: "reconnecting (attempt 3)…",
+      },
       { type: "reconnected" },
     );
     expect(state.status).toBe("listening");

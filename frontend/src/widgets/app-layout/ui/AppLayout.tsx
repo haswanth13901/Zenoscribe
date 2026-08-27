@@ -75,11 +75,7 @@ export function AppLayout({
           adminRecordingsTabActive={adminRecordingsTabActive}
         />
         {!collapsed && (
-          <div
-            className={styles.backdrop}
-            onClick={() => setCollapsed(true)}
-            aria-hidden="true"
-          />
+          <div className={styles.backdrop} onClick={() => setCollapsed(true)} aria-hidden="true" />
         )}
         <div
           id="appMainCol"

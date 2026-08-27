@@ -32,7 +32,11 @@ export function HomePage(): ReactElement {
 
           <div className={styles.secHead}>
             <h2>Recent sessions</h2>
-            <button type="button" className={styles.viewAll} onClick={() => navigate("/recordings")}>
+            <button
+              type="button"
+              className={styles.viewAll}
+              onClick={() => navigate("/recordings")}
+            >
               View all
             </button>
           </div>

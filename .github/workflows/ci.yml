@@ -98,6 +98,17 @@ jobs:
       - name: Install dependencies
         run: npm --prefix frontend ci
 
+      # Prettier only - no ESLint yet. typescript-eslint doesn't support the
+      # pinned typescript@^7.0.2, and downgrading TypeScript to 5.9.x purely
+      # to unblock a linter is the wrong trade (see issue #28, deferred until
+      # typescript-eslint catches up). `format:check` has existed in
+      # package.json since the frontend was set up but no CI job ever ran it,
+      # so formatting drift was ungated on a codebase the backend's flake8
+      # gate holds to a stricter standard. Runs before the test suite so a
+      # formatting failure doesn't wait on ~40s of Vitest.
+      - name: Check formatting (Prettier)
+        run: npm --prefix frontend run format:check
+
       - name: Run Vitest suite
         run: npm --prefix frontend test
         timeout-minutes: 10
