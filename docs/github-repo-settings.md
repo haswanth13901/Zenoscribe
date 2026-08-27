@@ -72,10 +72,13 @@ actually means "no review requirement."
 - ✅ Require status checks to pass before merging -> add **only**:
   `Production gate passed` (the `release-gate.yml` aggregator)
 - ✅ Require branches to be up to date before merging
-- ✅ Require linear history (matches the release flow's "merge, no squash"
-  - this still forbids merge commits with multiple parents; if that
-  conflicts with the intended non-squash merge, use "Require merge queue"
-  off and a fast-forward-only merge instead, and revisit this checkbox)
+- ❌ Require linear history - **leave this off.** The release flow merges
+  `dev` into `main` without squashing (see "Release flow" in
+  `CONTRIBUTING.md`), which produces a merge commit with two parents -
+  precisely what linear history forbids. Enabled, it blocks the merge
+  button on every `dev -> main` release PR. The live value is `false`, set
+  that way deliberately during the branch split; don't "correct" it to
+  `true`.
 - ✅ Do not allow force pushes (may be on by default once protection exists)
 - ✅ Do not allow deletions
 
@@ -86,7 +89,7 @@ gh api repos/{owner}/{repo}/branches/main/protection \
   --field required_pull_request_reviews=null \
   --field required_status_checks='{"strict":true,"contexts":["Production gate passed"]}' \
   --field enforce_admins=false \
-  --field required_linear_history=true \
+  --field required_linear_history=false \
   --field allow_force_pushes=false \
   --field allow_deletions=false \
   --field restrictions=null
@@ -94,7 +97,8 @@ gh api repos/{owner}/{repo}/branches/main/protection \
 
 Same caveat as §3: `required_pull_request_reviews` must be `null`, not
 `{}`, or it silently requires 1 approval that a solo maintainer can never
-supply.
+supply. And `required_linear_history` must be `false` for the reason above -
+a `true` here is what a squash-only repo wants, not this one.
 
 ## 5. The required-check trap - why only the two aggregators are listed above
 
