@@ -1,7 +1,18 @@
+/* Owns this page's vertical scroll. AppLayout's #appLayout is
+   overflow:hidden and #appMainCol is a min-height:0 flex column, so a page
+   that isn't its own scroll container just gets clipped - long transcripts
+   were unreachable. Same flex:1 + overflow-y:auto container every other
+   page uses (HomePage/MyRecordingsPage/AdminPage .main). */
 .panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 12px 40px;
+}
+
+.wrap {
   max-width: 780px;
   margin: 14px auto;
-  padding: 12px;
 }
 
 .card {
