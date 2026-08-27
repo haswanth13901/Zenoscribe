@@ -32,7 +32,7 @@ bcrypt==5.0.0
 PyJWT==2.13.0
 
 # Config & HTTP (requests is used at runtime by soniox_client.py)
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 requests==2.34.2
 
 # Shared state / object storage for horizontal scaling (see
