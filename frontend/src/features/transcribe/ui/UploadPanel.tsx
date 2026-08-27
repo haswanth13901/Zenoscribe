@@ -105,101 +105,105 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
 
   return (
     <div className={styles.panel}>
-      <div className={styles.card}>
-        <div className={styles.head}>
-          <strong>Transcribe a file</strong>
-          <button type="button" className={styles.button} onClick={handleReset}>
-            Reset
-          </button>
-        </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="audio/*"
-          hidden
-          onChange={onFileChange}
-          data-testid="upload-file-input"
-        />
-        <button
-          type="button"
-          className={styles.button}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          Choose file
-        </button>
-        {file && (
-          <div className={styles.filename}>
-            Selected: {file.name} ({Math.round(file.size / 1024)} KB)
+      <div className={styles.wrap}>
+        <div className={styles.card}>
+          <div className={styles.head}>
+            <strong>Transcribe a file</strong>
+            <button type="button" className={styles.button} onClick={handleReset}>
+              Reset
+            </button>
           </div>
-        )}
 
-        <div className={styles.row}>
-          <div
-            className={styles.field}
-            title="Optional hint for how many distinct voices to expect"
-          >
-            <label htmlFor="upload-num-speakers">Speakers</label>
-            <input
-              id="upload-num-speakers"
-              type="number"
-              data-testid="upload-num-speakers"
-              min={1}
-              max={10}
-              placeholder="auto"
-              value={numSpeakers}
-              onChange={(e) => setNumSpeakers(e.target.value)}
-            />
-          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*"
+            hidden
+            onChange={onFileChange}
+            data-testid="upload-file-input"
+          />
           <button
             type="button"
             className={styles.button}
-            onClick={doTranscribe}
-            disabled={!file || transcribeState.isLoading}
+            onClick={() => fileInputRef.current?.click()}
           >
-            {transcribeState.isLoading ? "Transcribing..." : "Transcribe"}
+            Choose file
           </button>
-          <div className={styles.field}>
-            <label htmlFor="upload-lang">Translate (target language)</label>
-            <select
-              id="upload-lang"
-              value={targetLanguage}
-              onChange={(e) => setTargetLanguage(e.target.value)}
+          {file && (
+            <div className={styles.filename}>
+              Selected: {file.name} ({Math.round(file.size / 1024)} KB)
+            </div>
+          )}
+
+          <div className={styles.row}>
+            <div
+              className={styles.field}
+              title="Optional hint for how many distinct voices to expect"
             >
-              {languages.map((l) => (
-                <option key={l.code} value={l.code}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
+              <label htmlFor="upload-num-speakers">Speakers</label>
+              <input
+                id="upload-num-speakers"
+                type="number"
+                data-testid="upload-num-speakers"
+                min={1}
+                max={10}
+                placeholder="auto"
+                value={numSpeakers}
+                onChange={(e) => setNumSpeakers(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              className={styles.button}
+              onClick={doTranscribe}
+              disabled={!file || transcribeState.isLoading}
+            >
+              {transcribeState.isLoading ? "Transcribing..." : "Transcribe"}
+            </button>
+            <div className={styles.field}>
+              <label htmlFor="upload-lang">Translate (target language)</label>
+              <select
+                id="upload-lang"
+                value={targetLanguage}
+                onChange={(e) => setTargetLanguage(e.target.value)}
+              >
+                {languages.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              className={styles.button}
+              onClick={doTranscribeAndTranslate}
+              disabled={!file || translateState.isLoading}
+            >
+              {translateState.isLoading
+                ? "Transcribing & translating..."
+                : "Transcribe & Translate"}
+            </button>
           </div>
-          <button
-            type="button"
-            className={styles.button}
-            onClick={doTranscribeAndTranslate}
-            disabled={!file || translateState.isLoading}
-          >
-            {translateState.isLoading ? "Transcribing & translating..." : "Transcribe & Translate"}
-          </button>
+
+          {transcribeResult && (
+            <TranscriptTurns turns={transcribeResult} emptyText="(no transcription)" />
+          )}
+          {transcribeState.isError && (
+            <div className={styles.errorText} data-testid="upload-transcribe-error">
+              {formatUploadError(transcribeState.error)}
+            </div>
+          )}
+
+          {translateResult && (
+            <TranscriptTurns turns={translateResult} emptyText="(no translation)" />
+          )}
+          {translateState.isError && (
+            <div className={styles.errorText} data-testid="upload-translate-error">
+              {formatUploadError(translateState.error)}
+            </div>
+          )}
         </div>
-
-        {transcribeResult && (
-          <TranscriptTurns turns={transcribeResult} emptyText="(no transcription)" />
-        )}
-        {transcribeState.isError && (
-          <div className={styles.errorText} data-testid="upload-transcribe-error">
-            {formatUploadError(transcribeState.error)}
-          </div>
-        )}
-
-        {translateResult && (
-          <TranscriptTurns turns={translateResult} emptyText="(no translation)" />
-        )}
-        {translateState.isError && (
-          <div className={styles.errorText} data-testid="upload-translate-error">
-            {formatUploadError(translateState.error)}
-          </div>
-        )}
       </div>
     </div>
   );
