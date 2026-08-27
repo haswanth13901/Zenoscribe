@@ -27,9 +27,17 @@ updates:
     target-branch: "dev"
     schedule:
       interval: "weekly"
+    ignore:
+      # Node 25 is odd-numbered and never becomes LTS - it goes EOL within
+      # months of release. Holding at 20 (still in maintenance) and moving
+      # straight to 26 when that reaches LTS. Without this rule, closing the
+      # 25.x PR just has Dependabot reopen it on the next weekly scan.
+      # Decision recorded on issue #26.
+      - dependency-name: "node"
+        versions: ["25.x"]
 
   # Base images pinned in frontend/Dockerfile (node:20-slim,
-  # nginx:1.27-alpine) - Dependabot's docker ecosystem only looks in the
+  # nginx:1.31-alpine) - Dependabot's docker ecosystem only looks in the
   # exact directory given, not recursively, so this needs its own entry
   # separate from the root Dockerfile above.
   - package-ecosystem: "docker"
@@ -37,6 +45,11 @@ updates:
     target-branch: "dev"
     schedule:
       interval: "weekly"
+    ignore:
+      # Same as the root Dockerfile entry above - both images move to Node 26
+      # together, never one at a time. See issue #26.
+      - dependency-name: "node"
+        versions: ["25.x"]
 
   # Actions pinned across .github/workflows/*.yml (actions/checkout,
   # actions/setup-python, aquasecurity/trivy-action, etc).
