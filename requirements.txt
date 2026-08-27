@@ -25,7 +25,7 @@ alembic==1.17.1
 # and every migration file import it directly (`sa.Column` etc.), and it runs
 # on every app startup (db.init()), so an unpinned transitive bump could
 # silently break migrations.
-sqlalchemy==2.0.49
+sqlalchemy==2.0.52
 
 # Auth
 bcrypt==5.0.0
