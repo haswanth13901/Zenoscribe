@@ -132,12 +132,7 @@ describe("Sidebar", () => {
   it("highlights All Recordings, not Admin console, while AdminPage's Recordings tab is showing", () => {
     render(
       <MemoryRouter initialEntries={["/admin"]}>
-        <Sidebar
-          user={adminUser}
-          currentPath="/admin"
-          collapsed={false}
-          adminRecordingsTabActive
-        />
+        <Sidebar user={adminUser} currentPath="/admin" collapsed={false} adminRecordingsTabActive />
       </MemoryRouter>,
     );
     expect(screen.getByRole("link", { name: "Admin console" }).className).not.toMatch(/active/);

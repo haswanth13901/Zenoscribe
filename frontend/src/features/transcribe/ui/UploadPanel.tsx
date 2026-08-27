@@ -121,7 +121,11 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
           onChange={onFileChange}
           data-testid="upload-file-input"
         />
-        <button type="button" className={styles.button} onClick={() => fileInputRef.current?.click()}>
+        <button
+          type="button"
+          className={styles.button}
+          onClick={() => fileInputRef.current?.click()}
+        >
           Choose file
         </button>
         {file && (
@@ -131,7 +135,10 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
         )}
 
         <div className={styles.row}>
-          <div className={styles.field} title="Optional hint for how many distinct voices to expect">
+          <div
+            className={styles.field}
+            title="Optional hint for how many distinct voices to expect"
+          >
             <label htmlFor="upload-num-speakers">Speakers</label>
             <input
               id="upload-num-speakers"
@@ -172,9 +179,7 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
             onClick={doTranscribeAndTranslate}
             disabled={!file || translateState.isLoading}
           >
-            {translateState.isLoading
-              ? "Transcribing & translating..."
-              : "Transcribe & Translate"}
+            {translateState.isLoading ? "Transcribing & translating..." : "Transcribe & Translate"}
           </button>
         </div>
 
@@ -187,7 +192,9 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
           </div>
         )}
 
-        {translateResult && <TranscriptTurns turns={translateResult} emptyText="(no translation)" />}
+        {translateResult && (
+          <TranscriptTurns turns={translateResult} emptyText="(no translation)" />
+        )}
         {translateState.isError && (
           <div className={styles.errorText} data-testid="upload-translate-error">
             {formatUploadError(translateState.error)}

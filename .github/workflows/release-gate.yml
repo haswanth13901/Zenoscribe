@@ -23,7 +23,12 @@ jobs:
       # All 6 test_e2e_playwright_*.py files are @pytest.mark.integration -
       # target the whole tests dir (not a single file) so admin/app/home/
       # recordings/translate page coverage actually runs, not just upload.
-      pytest-args: 'voice_transcriber/tests -m integration -q'
+      # --cov-fail-under=0 overrides pytest.ini's fast-suite floor (a later
+      # CLI arg wins over addopts): this suite drives the app through a real
+      # subprocess (conftest.py's live_server fixture), so this process's
+      # own coverage.py instance never sees that code execute and would
+      # otherwise always measure ~0%.
+      pytest-args: 'voice_transcriber/tests -m integration -q --cov-fail-under=0'
       install-playwright: true
       job-timeout-minutes: 20
     # Deliberately gated to Tier 3 only, not every `dev` PR - see
@@ -37,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Builds the exact two images the deploy team runs
       # (docker-compose.prod.yml's `web` and `nginx` services - see that
@@ -111,10 +116,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -128,7 +133,7 @@ jobs:
           pip-audit -r requirements.txt
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -160,7 +165,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build backend image
         run: docker build -t zenoscribe-backend:ci .

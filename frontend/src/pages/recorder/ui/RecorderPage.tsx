@@ -84,16 +84,23 @@ export function RecorderPage(): ReactElement {
       </div>
 
       {!support.supported && (
-        <div className={styles.unsupportedWarning} data-testid="recorder-unsupported-warning" role="alert">
+        <div
+          className={styles.unsupportedWarning}
+          data-testid="recorder-unsupported-warning"
+          role="alert"
+        >
           {support.reason}
         </div>
       )}
 
       {state.backgrounded && (
-        <div className={styles.backgroundWarning} data-testid="recorder-background-warning" role="status">
-          This tab is in the background or your screen is locked — some
-          mobile browsers pause recording here. Keep this tab open and
-          visible to avoid losing audio.
+        <div
+          className={styles.backgroundWarning}
+          data-testid="recorder-background-warning"
+          role="status"
+        >
+          This tab is in the background or your screen is locked — some mobile browsers pause
+          recording here. Keep this tab open and visible to avoid losing audio.
         </div>
       )}
 

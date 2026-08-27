@@ -53,10 +53,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -86,10 +86,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -97,6 +97,17 @@ jobs:
 
       - name: Install dependencies
         run: npm --prefix frontend ci
+
+      # Prettier only - no ESLint yet. typescript-eslint doesn't support the
+      # pinned typescript@^7.0.2, and downgrading TypeScript to 5.9.x purely
+      # to unblock a linter is the wrong trade (see issue #28, deferred until
+      # typescript-eslint catches up). `format:check` has existed in
+      # package.json since the frontend was set up but no CI job ever ran it,
+      # so formatting drift was ungated on a codebase the backend's flake8
+      # gate holds to a stricter standard. Runs before the test suite so a
+      # formatting failure doesn't wait on ~40s of Vitest.
+      - name: Check formatting (Prettier)
+        run: npm --prefix frontend run format:check
 
       - name: Run Vitest suite
         run: npm --prefix frontend test
@@ -113,7 +124,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # `docker compose config` also needs the `env_file:` target to
       # physically exist (a hard file-existence check, separate from - and
@@ -138,7 +149,7 @@ jobs:
         run: docker compose --env-file .env.production.example -f docker-compose.prod.yml config -q
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -165,7 +176,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build dev backend image (backend-with-frontend target)
         run: docker build --target backend-with-frontend -t zenoscribe-backend-dev:ci .

@@ -17,13 +17,20 @@
 # since the browser captures audio in that path)
 sounddevice==0.5.5
 numpy==2.5.1
-scipy==1.18.0
+scipy==1.18.1
 
 # Testing & E2E
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-playwright==0.8.0
 playwright==1.62.0
+
+# Coverage gate (pytest.ini's --cov-fail-under) - the floor is set for the
+# fast suite (ci.yml's backend-fast job); release-gate.yml/nightly-e2e-dev.yml
+# override it back to 0 for the Playwright integration suite, since that
+# suite runs the server as a subprocess (conftest.py's live_server fixture)
+# whose execution isn't captured by this process's coverage measurement.
+pytest-cov==7.1.0
 
 # Required by starlette.testclient.TestClient (used in conftest.py's
 # `client` fixture) - not a runtime dependency of the app itself.

@@ -138,7 +138,13 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
       // active status now recovers to "stopped". Reached today only after
       // reconnect attempts are exhausted (see reconnect-scheduled) - a
       // single drop retries first instead of landing here immediately.
-      return { ...state, status: "stopped", statusMessage: "stopped", isError: false, reconnecting: false };
+      return {
+        ...state,
+        status: "stopped",
+        statusMessage: "stopped",
+        isError: false,
+        reconnecting: false,
+      };
 
     case "ws-error":
       return {
@@ -151,7 +157,13 @@ export function translateReducer(state: TranslateState, event: TranslateEvent): 
 
     case "manual-stop":
       if (!ACTIVE_STATUSES.has(state.status)) return state;
-      return { ...state, status: "stopped", statusMessage: "stopped", isError: false, reconnecting: false };
+      return {
+        ...state,
+        status: "stopped",
+        statusMessage: "stopped",
+        isError: false,
+        reconnecting: false,
+      };
 
     case "restart-started":
       return { ...state, statusMessage: "restarting", isError: false };
