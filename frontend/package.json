@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -28,6 +28,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^29.1.1",
     "msw": "^2.15.0",
     "prettier": "^3.9.6",
