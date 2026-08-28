@@ -4,6 +4,7 @@ Plain SQL throughout via psycopg - no ORM. Schema lives in Alembic
 migrations (../alembic/versions/), not in this file.
 """
 
+import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -222,11 +223,87 @@ def touch_login(user_id):
         )
 
 
+# Presence bookkeeping. `users.last_seen` feeds exactly one thing: the admin
+# console's online/offline indicator, which is meaningful at minute
+# granularity. touch_seen() used to run on *every* authenticated request, so
+# a single active user rewrote their own row dozens of times a minute - and
+# under Postgres MVCC each of those is a new row version plus WAL traffic,
+# all to restate "still here". Two layers now keep that in check:
+#
+#   1. should_touch_seen() - an in-memory check made *before* any thread hop
+#      or connection checkout, so a request inside the window costs nothing
+#      at all: no executor slot, no pooled connection, no round trip.
+#   2. touch_seen()'s conditional WHERE - for writes that do get issued
+#      (cold cache after a restart, another replica's first sight of this
+#      user, or the request right after touch_login already set last_seen),
+#      Postgres matches zero rows and writes nothing.
+#
+# The cache is deliberately process-local: a stale entry can only cause an
+# extra write, never a missed one, so the worst case across N replicas is N
+# writes per window instead of one - still far below one-per-request, and
+# last_seen stays accurate to within LAST_SEEN_DEBOUNCE_SEC either way. That
+# is the kind of per-process state SCALABILITY_AUDIT finding F8 calls safe
+# to keep local.
+_last_seen_writes: dict = {}
+
+# Bounds the cache if a lot of distinct users are active at once. Only
+# consulted when the cache exceeds it, so the O(n) sweep stays off the hot
+# path.
+_LAST_SEEN_CACHE_MAX = 2048
+
+
+def _prune_last_seen_cache(now: float, window: int) -> None:
+    for key in [k for k, t in _last_seen_writes.items() if (now - t) >= window]:
+        del _last_seen_writes[key]
+    if len(_last_seen_writes) >= _LAST_SEEN_CACHE_MAX:
+        # Every entry still inside its window - i.e. more than
+        # _LAST_SEEN_CACHE_MAX genuinely-active users. Dropping the lot
+        # costs one extra write per active user, which is the right trade
+        # against unbounded memory.
+        _last_seen_writes.clear()
+
+
+def should_touch_seen(user_id) -> bool:
+    """Whether a last_seen write is due for user_id in this process.
+
+    Pure in-memory, no I/O - meant to be called straight from the event loop
+    so callers can skip the thread hop entirely when nothing is due.
+    Claims the window as a side effect: returning True records the write as
+    made, so concurrent callers don't all decide to write at once.
+
+    Reads the window from config on every call (never captured at import)
+    so tests can monkeypatch it, matching how DATABASE_URL is handled here.
+    """
+    window = app_config.LAST_SEEN_DEBOUNCE_SEC
+    if window <= 0:
+        return True  # debounce disabled - write on every request
+    key = str(user_id)
+    now = time.monotonic()
+    previous = _last_seen_writes.get(key)
+    if previous is not None and (now - previous) < window:
+        return False
+    if len(_last_seen_writes) >= _LAST_SEEN_CACHE_MAX:
+        _prune_last_seen_cache(now, window)
+    _last_seen_writes[key] = now
+    return True
+
+
 def touch_seen(user_id):
-    """Bump last_seen on any authenticated activity."""
+    """Bump last_seen on any authenticated activity.
+
+    The WHERE clause is the second layer described above: when last_seen is
+    already inside the debounce window this matches zero rows, so Postgres
+    writes nothing rather than producing a redundant row version. Callers
+    should still gate on should_touch_seen() to avoid the round trip in the
+    first place.
+    """
+    window = app_config.LAST_SEEN_DEBOUNCE_SEC
+    now = _now()
     with _get_pool().connection() as conn:
         conn.execute(
-            "UPDATE users SET last_seen = %s WHERE id = %s", (_now(), user_id)
+            "UPDATE users SET last_seen = %s "
+            "WHERE id = %s AND (last_seen IS NULL OR last_seen < %s)",
+            (now, user_id, now - timedelta(seconds=window)),
         )
 
 

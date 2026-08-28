@@ -111,6 +111,15 @@ if PRODUCTION and not os.environ.get('REDIS_URL'):
 # DEPLOYMENT.md's sizing guidance.
 DB_POOL_MAX_SIZE = int(os.environ.get('DB_POOL_MAX_SIZE', '10'))
 
+# How long a process may reuse its own `users.last_seen` write for a given
+# user before writing again. last_seen feeds exactly one thing - the admin
+# console's online/offline indicator - so minute-level accuracy is ample,
+# while the pre-debounce behaviour (a write on every authenticated request)
+# cost one Postgres row version per request per active user. See db.py's
+# should_touch_seen()/touch_seen() for the two layers this drives. Set to 0
+# to restore a write on every request.
+LAST_SEEN_DEBOUNCE_SEC = int(os.environ.get('LAST_SEEN_DEBOUNCE_SEC', '60'))
+
 # frontend/ is the single source dir for all frontend files; the backend
 # serves the Vite build output straight from frontend/dist/ (no separate
 # static/ copy) - see the repo README's "Frontend" section.

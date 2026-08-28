@@ -143,8 +143,13 @@ async def current_user(
             detail="Unauthorized",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    # Every authenticated request refreshes presence. Cheap single-row update.
-    await asyncio.to_thread(db.touch_seen, row["id"])
+    # Every authenticated request refreshes presence - but only when one is
+    # actually due. should_touch_seen() is an in-memory check, so a request
+    # inside the debounce window costs nothing here: no thread hop, no
+    # pooled connection, no write. See db.py's presence note for why this
+    # is gated rather than written every time.
+    if db.should_touch_seen(row["id"]):
+        await asyncio.to_thread(db.touch_seen, row["id"])
     return row
 
 

@@ -83,7 +83,10 @@ async def live(client: WebSocket):
     write_queue = asyncio.Queue()
 
     async def async_touch_seen(uid):
-        await asyncio.to_thread(db.touch_seen, uid)
+        # Same debounce gate as the HTTP path (auth.current_user) - one rule
+        # for presence everywhere. See db.py's presence note.
+        if db.should_touch_seen(uid):
+            await asyncio.to_thread(db.touch_seen, uid)
 
     async def async_delete_file(path):
         await asyncio.to_thread(path.unlink)
