@@ -142,7 +142,7 @@ async def transcribe_upload(
         try:
             if int(content_length) > config.MAX_UPLOAD_SIZE:
                 raise HTTPException(
-                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status.HTTP_413_CONTENT_TOO_LARGE,
                     f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
                 )
         except ValueError:
@@ -163,7 +163,7 @@ async def transcribe_upload(
                     # Ensure the tmp file is removed before returning a 413.
                     tmp.close()
                     raise HTTPException(
-                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status.HTTP_413_CONTENT_TOO_LARGE,
                         f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
                     )
                 tmp.write(chunk)
@@ -207,7 +207,7 @@ async def transcribe_and_translate(
         try:
             if int(content_length) > config.MAX_UPLOAD_SIZE:
                 raise HTTPException(
-                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status.HTTP_413_CONTENT_TOO_LARGE,
                     f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
                 )
         except ValueError:
@@ -227,7 +227,7 @@ async def transcribe_and_translate(
                 if size > config.MAX_UPLOAD_SIZE:
                     tmp.close()
                     raise HTTPException(
-                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status.HTTP_413_CONTENT_TOO_LARGE,
                         f"Upload exceeds maximum size of {config.MAX_UPLOAD_MB}MB",
                     )
                 tmp.write(chunk)
