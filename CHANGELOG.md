@@ -5,6 +5,53 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-08-28
+
+### Added
+
+- `DEPLOYMENT.md` gained an explicit pre-deploy/deploy/post-deploy spine.
+  §2 is now 2.1 (prerequisites: VM, DNS resolving before the TLS bootstrap,
+  firewall, secret generation, `.env.production`, the `nginx.conf` domain
+  edit, deploying a gate-green tag), 2.2 (the first deploy, step by step),
+  2.3 (verification: `ps`/`/healthz`/logs, and how to read each failure),
+  2.4 (the monitoring and backup jobs to wire up immediately), and 2.5
+  (deploying a new release). The actual deploy command previously appeared
+  only inside a §7 checkbox, and there was no roll-forward procedure at all -
+  only rollback.
+- `APP_VERSION`/`GIT_SHA` documented as build args in `DEPLOYMENT.md`.
+  `docker-compose.prod.yml` has consumed them since 1.2.x, but nothing told
+  the deploy team to export them, so a manual VM build stamped every image
+  `dev`/`unknown` and `GET /healthz` could not identify the running build.
+
+### Changed
+
+- `DEPLOYMENT.md` §7's gate trimmed from ten items to seven, with a preamble
+  listing what `release-gate.yml` already proves on every PR into `main`,
+  push to `main`, and version tag. Dropped: the manual check for a leaked
+  `.env` in the built image (`docker-build` greps for it), the
+  `STORAGE_BACKEND`/`REDIS_URL` guard checks (`prod-config-guardrails`
+  covers all six of `config.py`'s guards), and the manual re-run of the full
+  test suite. The `JWT_SECRET`/`SERVER_BOOT_ID` check stays and now covers
+  both - those guards live in `auth.py` and are outside CI's guardrail
+  matrix.
+- `docs/audits/DEPLOYMENT_READINESS_AUDIT.md`'s pre-deploy checklist no
+  longer duplicates the deploy procedure; it defers to `DEPLOYMENT.md` and
+  keeps only the audit-specific checks (port 8000 unreachable from the host,
+  security headers over the real domain) and the smoke test.
+
+### Fixed
+
+- Four broken cross-references in `DEPLOYMENT.md`: the `docker-build` job
+  cited as living in `ci.yml` (it is in `release-gate.yml`), a pointer to a
+  README section that does not exist, a `/healthz` response shape attributed
+  to the README (now stated inline), and a "§3 below" that is above.
+- Stale references in `docs/audits/DEPLOYMENT_READINESS_AUDIT.md`: six
+  `file:line` citations into `routes_api.py`/`server.py`/`auth.py`/
+  `transcribe.py` that no longer pointed at the code they described (the
+  route handlers moved into `voice_transcriber/routers/` in 1.2.7), two
+  section pointers into `DEPLOYMENT.md`, the claim that the repository has
+  no git tags (there are 17), and the `docker-build` trigger description.
+
 ## [1.3.5] - 2026-08-28
 
 ### Added
@@ -228,6 +275,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration (default branch, required secrets/variables, branch
   protection)
 
+[1.3.6]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.6
 [1.3.5]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.5
 [1.3.4]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.4
 [1.3.3]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.3

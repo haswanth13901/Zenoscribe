@@ -46,7 +46,8 @@ tasks that must happen before go-live.
 
 > **On keeping this doc current vs. a dated snapshot:** earlier versions of this audit
 > (through 2026-08-22) were a frozen snapshot with a separate "Status update" appendix in
-> `DEPLOYMENT.md` §5 carrying the live status. That split was intentional at the time, but
+> `DEPLOYMENT.md` §5 carrying the live status (that file's numbering as it stood then;
+> the equivalent section is §6 today). That split was intentional at the time, but
 > the deploying team decided it was more useful to keep one evergreen readiness doc
 > instead of maintaining two. This file is now rewritten in place on each pass; git
 > history is where the historical snapshots live if you need them.
@@ -75,7 +76,7 @@ left-most entry.
 `uvicorn/middleware/proxy_headers.py:169-187`'s `get_trusted_client_address` returns
 `x_forwarded_for_hosts[0]` (the left-most / attacker-supplied entry) whenever
 `always_trust` is set, which it is here (`Dockerfile:124` — `--forwarded-allow-ips="*"`).
-[voice_transcriber/routes_api.py:86](../../voice_transcriber/routes_api.py#L86)
+[voice_transcriber/routers/auth.py:36](../../voice_transcriber/routers/auth.py#L36)
 (`client_ip = request.client.host`, feeding `count_recent_failed_logins`/
 `record_failed_login`) and
 [voice_transcriber/rate_limit.py:107-109](../../voice_transcriber/rate_limit.py#L107-L109)
@@ -121,7 +122,7 @@ complete-outage or TLS-never-issues failure discovered only on the actual first 
 not caught by anything that ran so far.
 
 **Smallest fix:** this doesn't need a code change (the earlier audit pass already
-required the P1-A fix above) — it needs the verification DEPLOYMENT.md §6's gate
+required the P1-A fix above) — it needs the verification DEPLOYMENT.md §7's gate
 checklist already asks for, done for real, before this is trusted: build the image, run
 `nginx -t`, run `./scripts/init-letsencrypt.sh` against a real domain, and complete the
 full HTTPS smoke test (login, live record, translate, upload) over the real domain, not
@@ -129,14 +130,15 @@ localhost. Treat this stack as unverified until that happens once.
 
 ### P1-C. Unbounded recordings disk growth has no automated monitoring
 
-**Evidence:** [transcribe.py:143-145](../../voice_transcriber/transcribe.py#L143-L145) — 16kHz,
+**Evidence:** [transcribe.py:136-138](../../voice_transcriber/transcribe.py#L136-L138) — 16kHz,
 16-bit, mono PCM WAV ⇒ 32,000 bytes/sec ⇒ **~115MB per concurrent live-session hour**.
 `DEPLOYMENT.md` §3 documents this as a manual watch; no cron, alert, or retention job
 exists anywhere in `scripts/` (`reconcile_recordings.py` only reconciles DB/file drift,
 it doesn't free space).
 
 **Failure scenario:** sustained live usage fills the disk within weeks on a modest VM; at
-that point Postgres can't write WAL and `recordings/` writes fail mid-session — silent
+that point Postgres can't write WAL and MinIO object writes (the `miniodata` volume)
+fail mid-session — silent
 data loss (caught broadly and logged, not surfaced to the user) rather than a clean,
 alertable failure.
 
@@ -162,11 +164,11 @@ remaining). Set it up before go-live, same as P1-C.
 ## Fixed (verified, not just doc-claimed)
 
 - **Blocking DB/bcrypt calls on the single event loop — Fixed.** Confirmed directly in
-  code, not taken on the doc's word: [auth.py:135](../../voice_transcriber/auth.py#L135)
+  code, not taken on the doc's word: [auth.py:152](../../voice_transcriber/auth.py#L152)
   (`await asyncio.to_thread(db.touch_seen, ...)`),
-  [routes_api.py:99](../../voice_transcriber/routes_api.py#L99) (`await
+  [routers/auth.py:49](../../voice_transcriber/routers/auth.py#L49) (`await
   asyncio.to_thread(auth.verify_password, ...)`), and every other `db.*`/`bcrypt.*` call
-  site in `routes_api.py`/`auth.py` now run through `asyncio.to_thread`, matching the
+  site in `routers/`/`auth.py` now run through `asyncio.to_thread`, matching the
   pattern `transcribe.py` already used. Full `pytest -q`: **81 passed, 21 deselected**,
   re-run this pass.
 - **WebSocket auth has no timeout on the first frame — Fixed.** `auth.user_from_ws` and
@@ -211,13 +213,15 @@ remaining). Set it up before go-live, same as P1-C.
 
 ## P2 — backlog
 
-- **No image registry / no git tags yet.** `docker-compose.prod.yml` still uses `build:
-  .`; `git tag` returns zero tags even after this session's commits. Rollback today means
-  a full rebuild (per `DEPLOYMENT.md` §2's rollback runbook), not an instant image swap.
-  The gate checklist already asks for a tag per deploy — actually doing it, and ideally
-  pushing built images to a registry, would make an incident-time rollback faster.
+- **No image registry.** `docker-compose.prod.yml` still uses `build: .`, so rollback
+  today means a full rebuild (per `DEPLOYMENT.md` §2.8's rollback runbook), not an
+  instant image swap. The "no git tags yet" half of this finding is resolved: 17 tags now
+  exist (`v1.0.0` … `v1.3.5`), and each build is version-stamped via the
+  `APP_VERSION`/`GIT_SHA` build args and reported back by `GET /healthz`, so you can tell
+  which build is running. Pushing those images to a registry (GHCR/ECR) is what would
+  still make an incident-time rollback faster.
 - **`/healthz` degradation has no automated remediation.**
-  [server.py:187-200](../../voice_transcriber/server.py#L187-L200) correctly 503s when
+  [server.py:248-274](../../voice_transcriber/server.py#L248-L274) correctly 503s when
   `db.ping()` fails, and the Compose healthcheck marks `web` unhealthy — but `restart:
   unless-stopped` triggers on container *exit*, not failed healthcheck, so a sustained DB
   outage leaves `web` running and serving 503s rather than being cycled or alerting.
@@ -235,7 +239,7 @@ remaining). Set it up before go-live, same as P1-C.
 
 - **Ownership/authorization checks are consistent and correctly fail closed to 404.**
   Every recording route goes through `_authorize_recording()`
-  ([routes_api.py:325-332](../../voice_transcriber/routes_api.py#L325-L332)), 404s (not 403s) on
+  ([routers/recordings.py:75-82](../../voice_transcriber/routers/recordings.py#L75-L82)), 404s (not 403s) on
   a mismatched `user_id`. `rec_id` is only ever an exact-match DB lookup key, never
   path-concatenated. Every `/api/admin/*` route requires `Depends(auth.current_admin)`
   server-side; the frontend's `RequireAuth adminOnly` is UX convenience, not the
@@ -294,11 +298,12 @@ remaining). Set it up before go-live, same as P1-C.
 - `uvicorn/middleware/proxy_headers.py`'s trust behavior confirmed by reading the
   installed package source directly, not assumed (see P1-A).
 - Recording ownership checks, admin-route gating, and no-path-traversal-via-`rec_id`
-  re-traced through `routes_api.py`.
+  re-traced through `routers/recordings.py`/`routers/admin.py`.
 - No secret values (only variable *names*) in any `log.*` call across the backend.
 - `.dockerignore` still correctly excludes `.env*` and `voice_transcriber/recordings/`;
-  CI's `docker-build` job independently re-verifies no `.env` lands in the built image on
-  every push.
+  CI's `docker-build` job (`.github/workflows/release-gate.yml`) independently re-verifies
+  no `.env` lands in the built image on every PR into `main`, every push to `main`, and
+  every version tag.
 
 ## Unverified / needs access
 
@@ -318,69 +323,56 @@ remaining). Set it up before go-live, same as P1-C.
 
 ## Pre-deploy checklist
 
+`DEPLOYMENT.md` is the canonical procedure — §2.1 (prerequisites), §2.2 (first deploy),
+§2.3 (verification) and §7 (the gate). This section deliberately no longer repeats it;
+two copies of a deploy procedure drift apart. What follows is only what *this audit*
+adds on top: the findings above that must be closed, and the checks that exist because
+of them.
+
+**Findings to close before go-live** — none are code changes:
+
+- [ ] **P1-B** — run `docker-compose.prod.yml` end to end for the first time:
+      `./scripts/init-letsencrypt.sh` against the real domain, then the smoke test
+      below. Nothing in this stack has ever been built or run.
+- [ ] **P1-C** — disk-usage alerting for the `miniodata` volume, sized against expected
+      concurrent-usage hours. Before real traffic, not after.
+- [ ] **P1-D** — certificate-expiry alerting (`openssl s_client ... -noout -enddate`,
+      alert under ~14 days remaining).
+- [ ] **P2** — external monitoring against `GET /healthz` that pages a human; a failed
+      healthcheck neither restarts the container nor alerts on its own.
+
+**Audit-specific checks**, not covered by `DEPLOYMENT.md`'s gate:
+
 ```bash
-# 1. Fresh clone, confirm nothing depends on local/dev state
-git clone <repo-url> zenoscribe-deploy && cd zenoscribe-deploy
-cp .env.production.example .env.production
-# fill in: POSTGRES_PASSWORD, SONIOX_API_KEY (a fresh production key, not dev's),
-#          JWT_SECRET (python -c "import secrets; print(secrets.token_urlsafe(48))"),
-#          ADMIN_PASSWORD (strong, >=8 chars), SERVER_BOOT_ID (pin it, or accept
-#          that every restart logs everyone out - decide this deliberately),
-#          DOMAIN, CERTBOT_EMAIL
+# web's port must not be reachable from the host - only nginx may reach it
+curl -m 3 http://127.0.0.1:8000/healthz   # must fail to connect
 
-# 2. Hand-edit the real domain into frontend/nginx.conf (server_name + ssl_certificate
-#    paths) - same manual pattern the old Caddyfile used, see that file's header comment
-
-# 3. Prove the production guards actually fire (DEPLOYMENT.md's own gate item)
-#    Temporarily blank JWT_SECRET in .env.production and confirm the container
-#    refuses to start, then restore it.
-
-# 4. One-time TLS bootstrap (P1-B - this is the step that's never been run end to end)
-./scripts/init-letsencrypt.sh
-
-# 5. Build and bring up the rest of the stack
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
-
-# 6. Confirm the image contents match expectations
-docker run --rm $(docker compose -f docker-compose.prod.yml images -q web) ls -a /app
-#   -> only .env.example / .env.production.example, no real .env
-
-# 7. Confirm port 8000 is not reachable from the host
-curl -m 3 http://127.0.0.1:8000/healthz   # should fail to connect (only nginx can reach it)
-
-# 8. Confirm the certificate is real Let's Encrypt, not the bootstrap dummy self-signed one
-openssl s_client -connect $DOMAIN:443 -servername $DOMAIN </dev/null 2>/dev/null | openssl x509 -noout -issuer
-
-# 9. Set up disk-usage alerting on the VM NOW (P1-C) - before real traffic, not after
-# 10. Set up certificate-expiry alerting on the VM NOW (P1-D)
-# 11. Set up external monitoring against GET /healthz (DEPLOYMENT.md §3)
-
-# 12. Full test suite green on the exact deployed commit
-python -m flake8 voice_transcriber scripts --max-line-length=120
-python -m pytest -q
-python -m pytest -q -m integration   # real Playwright E2E suite - needs Postgres/Redis
-                                      # reachable and Playwright browsers installed
-npm --prefix frontend run build
-npm --prefix frontend test
-
-# 13. Tag the release
-git tag deploy-$(date +%Y%m%d) && git push --tags   # only if the user wants this pushed
-
-# --- Post-deploy smoke test (over the real HTTPS domain, not localhost) ---
-# a. Log in as the seeded admin; confirm the login page loads over TLS with the
-#    security headers present:
+# Security headers actually served over the real domain (P1-A rebuilt this edge)
 curl -sI https://$DOMAIN/ | grep -Ei 'strict-transport|x-frame|x-content-type|content-security'
-# b. Create one real user via the admin console.
-# c. As that user: start a live recording, speak a sentence, stop it, confirm the
-#    transcript appears in "My recordings" and the audio file downloads.
-# d. As that user: try /translate one-way for a few seconds; confirm captions and
-#    (if enabled) spoken TTS playback work.
-# e. As that user: upload a short audio file via /upload; confirm it returns turns
-#    and shows up in "My recordings" tagged source=upload.
-# f. Negative auth check: as a second user, try GET /api/recordings/{first user's
-#    recording id}/audio - must be 404, not the file.
-# g. GET https://$DOMAIN/healthz -> {"status":"ok","database":"ok"}
 ```
+
+Two checks that earlier versions of this list asked for by hand are now proven by CI on
+every PR into `main`, every push to `main`, and every version tag — no real `.env` in the
+built image, and `config.py`'s six fail-fast guards firing (`release-gate.yml`'s
+`docker-build` and `prod-config-guardrails` jobs). The `JWT_SECRET`/`SERVER_BOOT_ID`
+guards live in `auth.py` and are *not* in that matrix; `DEPLOYMENT.md` §7 keeps them as a
+manual check, and that check is what proves `ENV=production` actually reached the process.
+
+**Post-deploy smoke test** — over the real HTTPS domain, not localhost:
+
+a. Log in as the seeded admin; confirm the login page loads over TLS.
+b. Create one real user via the admin console.
+c. As that user: start a live recording, speak a sentence, stop it; confirm the
+   transcript appears in "My recordings" and the audio file downloads.
+d. As that user: run `/translate` one-way for a few seconds; confirm captions and (if
+   enabled) spoken TTS playback work.
+e. As that user: upload a short audio file via `/upload`; confirm it returns turns and
+   appears in "My recordings" tagged `source=upload`.
+f. **Negative auth check:** as a second user, `GET /api/recordings/{first user's
+   recording id}/audio` must return 404, not the file.
+g. `GET https://$DOMAIN/healthz` → `{"status":"ok","database":"ok","version":...,
+   "git_sha":...}`. The version fields confirm *which* build is live — `dev`/`unknown`
+   means the `APP_VERSION`/`GIT_SHA` build args were skipped (`DEPLOYMENT.md` §2.2).
 
 ---
 
