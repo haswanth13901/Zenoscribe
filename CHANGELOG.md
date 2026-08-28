@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-08-28
+
+### Added
+
+- Retroactive changelog entry for 1.3.4, which shipped the changelog backfill
+  itself and so was never documented in it.
+- GitHub Releases published for every tag from 1.2.1 onward; only 1.0.0,
+  1.1.0 and 1.2.0 had Release objects before, so the repository's "Latest
+  release" still advertised 1.2.0.
+
+### Changed
+
+- Convention going forward: a version's changelog entry is written in the
+  same PR that gets tagged, not afterwards - which is what created the 1.3.4
+  gap.
+
+## [1.3.4] - 2026-08-28
+
+### Added
+
+- Changelog entries backfilled for 1.1.0 through 1.3.3. Fourteen releases had
+  shipped with only 1.0.0 documented.
+
+### Fixed
+
+- Fifteen references naming `routes_api.py` for code that moved into
+  `voice_transcriber/routers/` in 1.2.7, across `DEPLOYMENT.md`,
+  `docs/architecture.md`, `db.py`, `rate_limit.py`, `server.py`,
+  `storage/base.py`, `storage/local.py`, `storage/minio_backend.py`,
+  `scripts/reconcile_recordings.py` and three test modules.
+
+### Removed
+
+- `black==26.5.1` from `requirements-dev.txt`. Nothing ran it - not CI, not a
+  script, not a hook. Adopting it would reformat 51 of 63 files and require
+  reconciling its 88-column default with the flake8 gate's 120, so it is a
+  decision rather than a cleanup; the reasoning is recorded in the file.
+
 ## [1.3.3] - 2026-08-27
 
 ### Changed
@@ -190,6 +228,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration (default branch, required secrets/variables, branch
   protection)
 
+[1.3.5]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.5
+[1.3.4]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.4
 [1.3.3]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.3
 [1.3.2]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.2
 [1.3.1]: https://github.com/haswanth13901/Zenoscribe/releases/tag/v1.3.1
