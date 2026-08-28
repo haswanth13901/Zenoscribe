@@ -21,6 +21,7 @@ keep working unchanged.
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Response
@@ -54,7 +55,84 @@ except ImportError:  # run flat from inside the package dir
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("server")
 
-app = FastAPI(title="Zenoscribe")
+_ready = True
+
+# How long a graceful shutdown waits for active live sessions (transcribe.py
+# /ws, translate.py /ws/translate) to wrap up and persist their recording
+# before the process exits. Whatever's still running the process exits
+# behaves like today's un-graceful restart already does (session lost) -
+# this is a best-effort improvement, not a hard guarantee (see
+# live_sessions.py). Must be shorter than however long the container
+# orchestrator waits before SIGKILL-ing the process (Docker Compose's
+# `stop_grace_period`, set accordingly in docker-compose.prod.yml) or the
+# drain gets killed mid-wait with no benefit over not draining at all.
+GRACEFUL_SHUTDOWN_GRACE_SEC = int(os.environ.get("GRACEFUL_SHUTDOWN_GRACE_SEC", "30"))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup/shutdown for the whole app, in one place.
+
+    Replaces the deprecated @app.on_event("startup"/"shutdown") pair.
+    Everything before the `yield` runs before uvicorn accepts its first
+    connection; everything after runs once uvicorn begins its shutdown
+    sequence (SIGTERM). Startup work here is blocking and deliberately
+    so - nothing is being served yet, and the app must not come up at
+    all if the schema check or the seed-admin step fails.
+    """
+    global _ready
+
+    # Reset explicitly: a real production process only starts once, but
+    # TestClient (see conftest.py's `client` fixture) runs a full
+    # startup/shutdown cycle per test against this same shared `app`
+    # instance, and the post-yield half below flips this to False -
+    # without resetting it here, every test after the first would see
+    # /healthz permanently report "shutting_down".
+    _ready = True
+
+    # Migrations are NOT run here (see db.init()'s docstring) - this only
+    # verifies the schema a deploy-time migration step already applied is
+    # the one this code expects, and refuses to serve otherwise. Required
+    # once more than one replica can start concurrently (see
+    # SCALABILITY_AUDIT.md finding F4); harmless for a single instance too.
+    db.verify_schema_current()
+    seeded = auth.ensure_seed_admin()
+    if seeded:
+        username, generated_flag = seeded
+        if generated_flag:
+            # In non-production, a generated password was used. Avoid logging the
+            # actual password so it doesn't leak into logs; instruct the operator
+            # to rotate it after first login.
+            log.warning(
+                "Created admin '%s' with a generated password (development/testing only). Change it after first login.",
+                username,
+            )
+        else:
+            log.info("Created admin '%s' from ADMIN_PASSWORD", username)
+
+    yield
+
+    # Flip /healthz to unready immediately so an external load balancer/
+    # orchestrator stops routing new requests and new WS connection
+    # attempts here - see the /healthz handler below. This is the FastAPI/
+    # Starlette "lifespan shutdown" hook, which fires as soon as uvicorn
+    # begins its own shutdown sequence (SIGTERM), independent of however
+    # long the rest of this function takes.
+    _ready = False
+
+    still_active = await live_sessions.request_shutdown_and_wait(GRACEFUL_SHUTDOWN_GRACE_SEC)
+    if still_active:
+        log.warning(
+            "shutdown: %d live session(s) still active after %ds grace period; "
+            "exiting anyway (matches an ordinary ungraceful restart's behavior)",
+            still_active, GRACEFUL_SHUTDOWN_GRACE_SEC,
+        )
+
+    db.close_pool()
+    redis_client.close_client()
+
+
+app = FastAPI(title="Zenoscribe", lifespan=lifespan)
 # Per-IP safety net on every request/WS handshake - see rate_limit.py.
 # Specific expensive endpoints (uploads, WS connects) have their own
 # tighter per-user limits declared where they're defined.
@@ -89,75 +167,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type"],
 )
-
-
-_ready = True
-
-# How long a graceful shutdown waits for active live sessions (transcribe.py
-# /ws, translate.py /ws/translate) to wrap up and persist their recording
-# before the process exits. Whatever's still running the process exits
-# behaves like today's un-graceful restart already does (session lost) -
-# this is a best-effort improvement, not a hard guarantee (see
-# live_sessions.py). Must be shorter than however long the container
-# orchestrator waits before SIGKILL-ing the process (Docker Compose's
-# `stop_grace_period`, set accordingly in docker-compose.prod.yml) or the
-# drain gets killed mid-wait with no benefit over not draining at all.
-GRACEFUL_SHUTDOWN_GRACE_SEC = int(os.environ.get("GRACEFUL_SHUTDOWN_GRACE_SEC", "30"))
-
-
-@app.on_event("startup")
-def _startup():
-    # Reset explicitly: a real production process only starts once, but
-    # TestClient (see conftest.py's `client` fixture) runs a full
-    # startup/shutdown cycle per test against this same shared `app`
-    # instance, and _shutdown() below flips this to False - without
-    # resetting it here, every test after the first would see /healthz
-    # permanently report "shutting_down".
-    global _ready
-    _ready = True
-
-    # Migrations are NOT run here (see db.init()'s docstring) - this only
-    # verifies the schema a deploy-time migration step already applied is
-    # the one this code expects, and refuses to serve otherwise. Required
-    # once more than one replica can start concurrently (see
-    # SCALABILITY_AUDIT.md finding F4); harmless for a single instance too.
-    db.verify_schema_current()
-    seeded = auth.ensure_seed_admin()
-    if seeded:
-        username, generated_flag = seeded
-        if generated_flag:
-            # In non-production, a generated password was used. Avoid logging the
-            # actual password so it doesn't leak into logs; instruct the operator
-            # to rotate it after first login.
-            log.warning(
-                "Created admin '%s' with a generated password (development/testing only). Change it after first login.",
-                username,
-            )
-        else:
-            log.info("Created admin '%s' from ADMIN_PASSWORD", username)
-
-
-@app.on_event("shutdown")
-async def _shutdown():
-    # Flip /healthz to unready immediately so an external load balancer/
-    # orchestrator stops routing new requests and new WS connection
-    # attempts here - see the /healthz handler below. This is the FastAPI/
-    # Starlette "lifespan shutdown" hook, which fires as soon as uvicorn
-    # begins its own shutdown sequence (SIGTERM), independent of however
-    # long the rest of this function takes.
-    global _ready
-    _ready = False
-
-    still_active = await live_sessions.request_shutdown_and_wait(GRACEFUL_SHUTDOWN_GRACE_SEC)
-    if still_active:
-        log.warning(
-            "shutdown: %d live session(s) still active after %ds grace period; "
-            "exiting anyway (matches an ordinary ungraceful restart's behavior)",
-            still_active, GRACEFUL_SHUTDOWN_GRACE_SEC,
-        )
-
-    db.close_pool()
-    redis_client.close_client()
 
 
 # See the module docstring: absent in the production backend image (its own
@@ -242,9 +251,10 @@ async def healthz(response: Response):
     config.APP_VERSION/GIT_SHA) - no other config is exposed here.
 
     Checked first, before touching the database at all: once a graceful
-    shutdown has started (_shutdown() in this module), this immediately
-    reports unready so an external load balancer stops routing new
-    requests/WS connections here - see GRACEFUL_SHUTDOWN_GRACE_SEC's
+    shutdown has started (the post-yield half of lifespan() in this
+    module), this immediately reports unready so an external load balancer
+    stops routing new requests/WS connections here - see
+    GRACEFUL_SHUTDOWN_GRACE_SEC's
     docstring above for why this needs to happen before, not during, the
     session-drain wait.
     """
