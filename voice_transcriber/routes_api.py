@@ -11,9 +11,9 @@ matches them exactly as before.
 
 The re-exports below are the module's established surface: tests reach for
 routes_api.sx (to patch soniox_client.transcribe_file) and call
-routes_api._persist_upload_recording directly, and storage/base.py's
-comments point at routes_api.py's USERNAME_RE. Each name below is the same
-object as in the module that defines it, not a copy.
+routes_api._persist_upload_recording directly. Each name below is the same
+object as in the module that defines it, not a copy, so patching through
+this module still reaches the code that runs.
 """
 
 from fastapi import APIRouter

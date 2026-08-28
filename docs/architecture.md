@@ -42,7 +42,7 @@ change transcription behavior. For the frontend, see
     for the full design.
   Neither backend is ever served as static files; all access goes through
   authenticated, ownership-checked API routes (`_authorize_recording()` in
-  `routes_api.py`), regardless of which backend answers the read.
+  `routers/recordings.py`), regardless of which backend answers the read.
 - **`recordings.source`** — one of `transcribe` / `translate` / `upload`
   (`db.RECORDING_SOURCES`), recording which flow produced the row: a live
   transcription session, a live translate session, or a batch upload via
@@ -54,7 +54,8 @@ neither is `.env` (which holds `DATABASE_URL`/`REDIS_URL` and other secrets).
 
 If stored recordings and the `recordings` table ever drift out of sync (e.g.
 a partial failure mid-save, or a MinIO hiccup - the storage-upload steps in
-transcribe.py/translate.py/routes_api.py are deliberately best-effort so a
+transcribe.py/translate.py/routers/uploads.py are deliberately best-effort
+so a
 storage blip doesn't turn an otherwise-successful session into an error),
 `scripts/reconcile_recordings.py` reports stored objects with no matching DB
 row and DB rows pointing at missing objects. Works against either storage

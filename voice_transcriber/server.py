@@ -144,7 +144,8 @@ class _DevOnlyCORSMiddleware:
     """Forwards to Starlette's CORSMiddleware only when config.PRODUCTION is
     False - read fresh on every request rather than captured once when this
     middleware is constructed, the same way config.ALLOW_TEST_HOOKS is
-    re-checked per-request elsewhere in this repo (routes_api.py), so tests
+    re-checked per-request elsewhere in this repo (routers/test_hooks.py), so
+    tests
     can flip config.PRODUCTION via monkeypatch and see the change take
     effect on the same app/TestClient instance. Production stays same-origin
     behind nginx with zero CORS surface either way."""
@@ -219,7 +220,7 @@ if SERVE_FRONTEND:
     @app.get("/recordings")
     @app.get("/recordings/")
     async def recordings_page():
-        # Distinct from GET /api/recordings (routes_api.py).
+        # Distinct from GET /api/recordings (routers/recordings.py).
         return FileResponse(f"{config.FRONTEND_DIST_DIR}/index.html")
 
     @app.get("/upload")

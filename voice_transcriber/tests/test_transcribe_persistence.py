@@ -146,7 +146,7 @@ async def test_audio_upload_failure_still_writes_transcript_and_db_row(
 ):
     """The DB row still gets created pointing at a wav_key even if the
     upload itself failed - same accepted drift-tolerant philosophy as
-    translate.py/routes_api.py's other independent-step persistence
+    translate.py/routers/uploads.py's other independent-step persistence
     (reconcile_recordings.py exists precisely to find/report this class of
     mismatch, not to make it impossible)."""
     user_id, username = rec_user

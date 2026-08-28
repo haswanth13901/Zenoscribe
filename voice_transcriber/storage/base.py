@@ -19,9 +19,10 @@ def recording_key(user_id: str, recording_id: str, suffix: str) -> str:
 
     `user_id` is always server-generated (uuid.uuid4().hex, db.create_user)
     and never attacker-influenceable. `recording_id` (a "session" string in
-    transcribe.py/translate.py/routes_api.py) embeds the acting user's
+    transcribe.py/translate.py/routers/uploads.py) embeds the acting user's
     username, which the real primary guard against this lives in
-    routes_api.py's USERNAME_RE - this check is a second, defense-in-depth
+    routers/admin.py's USERNAME_RE - this check is a second,
+    defense-in-depth
     layer here at the one chokepoint every caller passes through, not the
     guard itself.
     """
@@ -47,7 +48,7 @@ class StorageService(Protocol):
         then deleted, for MinIO). On failure (an exception is raised),
         local_path is left in place so the caller's own error-path cleanup
         still works, matching the existing try/finally unlink pattern in
-        routes_api.py's upload endpoints."""
+        routers/uploads.py's upload endpoints."""
         ...
 
     def download_to(self, key: str, local_path: Path) -> None:
