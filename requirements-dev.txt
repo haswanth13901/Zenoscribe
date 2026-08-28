@@ -48,13 +48,19 @@ httpx==0.28.1
 fakeredis[lua]==2.37.1
 lupa==2.8
 
-# Dev tools. flake8 is also CI's backend-lint gate (blocking) - pinned exact,
-# like everything else in this file, so a new major release can't silently
-# change which rules fire and break the gate on an unrelated push.
-# Dependabot (.github/dependabot.yml) opens the bump PR when a new version
-# ships; that PR is what should move this pin, not an ad-hoc edit.
+# Lint. flake8 is also CI's backend-lint gate (blocking) - pinned exact, like
+# everything else in this file, so a new major release can't silently change
+# which rules fire and break the gate on an unrelated push. Dependabot
+# (.github/dependabot.yml) opens the bump PR when a new version ships; that
+# PR is what should move this pin, not an ad-hoc edit.
+#
+# No formatter here on purpose. `black` was pinned but nothing ever ran it -
+# not CI, not a script, not a hook - so it was a dependency maintained for
+# nothing. Adopting it is a real decision, not a cleanup: it would reformat
+# 51 of 63 files in one commit, and its 88-column default has to be
+# reconciled with the --max-line-length=120 the flake8 gate uses. Decide it
+# on its own merits if you want it back.
 flake8==7.3.0
-black==26.5.1
 
 # =============================================================================
 # Non-pip / outside the venv

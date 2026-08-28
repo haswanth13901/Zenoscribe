@@ -404,7 +404,8 @@ step if you outgrow this table.
 **Workers.** There is no background job queue/worker fleet in this
 architecture, deliberately — see `docs/audits/SCALABILITY_DESIGN.md` §1 for why: batch
 upload transcription already scales linearly with replica count via its own
-per-process bounded thread pool (`routes_api.py`'s `_UPLOAD_EXECUTOR`), and
+per-process bounded thread pool (`routers/uploads.py`'s
+`_UPLOAD_EXECUTOR`), and
 live transcription/translation is an inherently synchronous bidirectional
 stream that has nothing to meaningfully queue. Nothing to configure here.
 

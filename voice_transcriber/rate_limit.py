@@ -18,7 +18,7 @@ Two ways to use it:
     frame, not a header) and GlobalRateLimitMiddleware (runs below FastAPI's
     dependency system entirely, as raw ASGI).
 
-`/api/login` keeps its own dedicated, DB-backed limiter (routes_api.py) -
+`/api/login` keeps its own dedicated, DB-backed limiter (routers/auth.py) -
 that one needs to survive process restarts and was already correctly shared
 across replicas before this module existed (Postgres-backed); it isn't
 touched here.

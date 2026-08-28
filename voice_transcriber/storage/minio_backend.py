@@ -51,7 +51,8 @@ def _is_not_found(exc: S3Error) -> bool:
 
 class _MinioObjectStream:
     """Adapts minio's underlying urllib3 response to a plain read()/close()
-    object, so routes_api.py's chunked-read loop works identically whether
+    object, so routers/recordings.py's chunked-read loop works identically
+    whether
     the backend handed it this or a local `open(path, "rb")` file object."""
 
     def __init__(self, response):
