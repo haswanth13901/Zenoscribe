@@ -2,7 +2,8 @@
 
 Deliberately thin. It creates the app and mounts two independent routers:
 
-    routes_api.py   auth, user administration, recording access
+    routes_api.py   auth, user administration, recording access - itself a
+                    thin aggregator over routers/ (one module per domain)
     transcribe.py   the realtime Soniox bridge and turn-detection engine
 
 Neither router imports the other. Both depend only on auth.py, db.py, and
