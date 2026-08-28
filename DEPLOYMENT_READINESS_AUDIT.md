@@ -172,7 +172,9 @@ remaining). Set it up before go-live, same as P1-C.
 - **WebSocket auth has no timeout on the first frame — Fixed.** `auth.user_from_ws` and
   `translate.py` wrap the first `receive_json()` in `asyncio.wait_for(..., timeout=10)`.
 - **Unrelated repo content shipped inside the production image — Fixed.**
-  `.dockerignore` excludes `voice_transcriber/tests/` and `voice_transcriber/code_reviews/`.
+  `.dockerignore` excludes `voice_transcriber/tests/`. (It also excluded
+  `voice_transcriber/code_reviews/` at the time of this audit; that directory was
+  deleted outright in #31, so the entry was dropped as dead config.)
 - **No lint CI gate — Fixed.** `backend-lint` runs `flake8` as a blocking job; re-run
   this pass, clean.
 - **No container/base-image scan, no Dependabot — Fixed.** CI's `docker-build` job runs
