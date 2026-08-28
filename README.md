@@ -195,7 +195,9 @@ Don't enable debug logging or test hooks in production.
 server.py         Thin entrypoint: app, page routes, mounts the two routers
 config.py         Paths + transcription tuning constants
 transcribe.py     Realtime engine: Soniox WebSocket bridge, turn detection
-routes_api.py     Auth, user administration, recording access
+routes_api.py     Thin aggregator over routers/
+routers/          One module per API domain: auth, admin, recordings,
+                  uploads, test_hooks
 auth.py           JWT, bcrypt, role guards
 db.py             Postgres storage (users, recordings, presence)
 soniox_client.py  Soniox REST + WebSocket config, speaker labeling
