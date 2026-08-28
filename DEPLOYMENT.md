@@ -17,11 +17,12 @@ the Compose setup — this is the one current doc, don't split back into two.
 | `nginx` | built from `frontend/Dockerfile` (nginx) | TLS termination, routing (`/api/*`/`/healthz`/`/ws*` to `web`, everything else served locally), security headers, and the SPA shell/login page/static assets - see `frontend/nginx.conf` |
 | `certbot` | stock `certbot/certbot`, no custom Dockerfile | Obtains and renews the Let's Encrypt certificate `nginx` serves - see §2's "First-boot TLS bootstrap" |
 
-See also: `README.md`'s "Production" section (how to run it),
-`SCALABILITY_AUDIT.md`/`SCALABILITY_DESIGN.md`/`HORIZONTAL_SCALABILITY_READINESS.md`
-(the horizontal-scaling work and its verification status), `E2E_Review.md`
-(open architectural items), `docker-compose.prod.yml` and
-`frontend/nginx.conf` (the actual configs, both commented inline).
+See also: `README.md`'s "Production" section (how to run it); under
+`docs/audits/`, the `SCALABILITY_AUDIT.md`/`SCALABILITY_DESIGN.md`/
+`HORIZONTAL_SCALABILITY_READINESS.md` trio (the horizontal-scaling work and
+its verification status) and `E2E_Review.md` (open architectural items); and
+`docker-compose.prod.yml` plus `frontend/nginx.conf` (the actual configs,
+both commented inline).
 
 ---
 
@@ -41,12 +42,12 @@ git-ignored.
 | `SONIOX_API_KEY` | Required | *(from console.soniox.com)* | Missing → app refuses to start. Wrong/expired/revoked → app boots fine, passes health checks, then throws on the first user who hits record — a generic 500 with nothing in the app logs pointing at the real cause. Test it end-to-end (§7/gate item) before calling the deploy done. |
 | `JWT_SECRET` | Required | 48-byte random string, `python -c "import secrets; print(secrets.token_urlsafe(48))"` | Missing → app refuses to start. Set once, keep stable — rotating it later force-logs-out every user (sometimes desired, e.g. after a suspected leak, but not routine). |
 | `REDIS_URL` | Required | `redis://redis:6379/0` (matches `docker-compose.prod.yml`'s `redis` service) | Missing → app refuses to start. Backs shared rate-limit counters (`rate_limit.py`) — with more than one `web` replica, this is what keeps a per-user limit from effectively multiplying by replica count. Never durable data; losing Redis loses nothing except a brief window of freshly-reset counters. Never expose its port publicly. |
-| `STORAGE_BACKEND` | Required, must be `minio` | `minio` | Missing or `local` → app refuses to start. `local` writes recordings to the container's own disk, invisible to any other `web` replica — see `SCALABILITY_AUDIT.md` finding F1. |
+| `STORAGE_BACKEND` | Required, must be `minio` | `minio` | Missing or `local` → app refuses to start. `local` writes recordings to the container's own disk, invisible to any other `web` replica — see `docs/audits/SCALABILITY_AUDIT.md` finding F1. |
 | `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_BUCKET` / `MINIO_SECURE` | `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` required when `STORAGE_BACKEND=minio` | `minio:9000` / *(strong, generated)* / *(strong, generated)* / `zenoscribe-recordings` / `false` | Missing access/secret key → app refuses to start. `docker-compose.prod.yml`'s `minio` service reads the same two vars (as `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`) so the two never drift apart. Never expose MinIO's API/console ports publicly. |
 | `ADMIN_USERNAME` | Optional | `admin` | Just the seeded first-admin username; harmless to leave default. |
 | `ADMIN_PASSWORD` | Required (first boot only) | strong password, ≥8 chars | Missing/weak → app refuses to start *if no admin exists yet* (i.e. blocks first boot only — irrelevant on every later restart once an admin row exists). |
 | `TOKEN_HOURS` | Optional | `8` | How long a login lasts before re-auth is required. No safety implication either way, just session-length UX. |
-| `SERVER_BOOT_ID` | **Required** | a fixed generated string, e.g. another `token_urlsafe(16)` | Missing → app refuses to start. Promoted from "strongly recommended" once multi-replica became a supported topology: **left unset, each replica would generate its own random value, and a token issued by one replica would be rejected by another** — every user would see random 401s depending on which replica a load balancer routed them to (`SCALABILITY_AUDIT.md` finding F3), independent of whether `JWT_SECRET` stays fixed. Set it once, the same value in every replica's environment; there's still no way to revoke one specific session early (§4, limitations). |
+| `SERVER_BOOT_ID` | **Required** | a fixed generated string, e.g. another `token_urlsafe(16)` | Missing → app refuses to start. Promoted from "strongly recommended" once multi-replica became a supported topology: **left unset, each replica would generate its own random value, and a token issued by one replica would be rejected by another** — every user would see random 401s depending on which replica a load balancer routed them to (`docs/audits/SCALABILITY_AUDIT.md` finding F3), independent of whether `JWT_SECRET` stays fixed. Set it once, the same value in every replica's environment; there's still no way to revoke one specific session early (§4, limitations). |
 | `DB_POOL_MAX_SIZE` | Optional | `10` | Postgres connection pool size **per replica** (`db.py`). Total connections against Postgres ≈ replica count × this value — shrink it as you add replicas so you don't exceed Postgres's `max_connections` (default 100). See "Scaling" below for a worked example. |
 | `GRACEFUL_SHUTDOWN_GRACE_SEC` | Optional | `30` | How long a replica waits, on SIGTERM, for active live transcription/translation sessions to finish and persist their recording before exiting (`server.py`, `live_sessions.py`). Must be shorter than `web`'s `stop_grace_period` in `docker-compose.prod.yml` (default `40s`) or Docker SIGKILLs the process before this wait completes — keep the two in sync if you change either. |
 | `ALLOW_TEST_HOOKS` | Must be `false` | `false` | App refuses to start if `true` in production — this is a safeguard already in code, this row is just confirming intent. Test hooks simulate upstream failures; never wanted in production. |
@@ -55,6 +56,61 @@ git-ignored.
 | `DEBUG_TOKENS` | Must be `false` | `false` | If `true`, logs token text — which may contain user speech — into application logs. Not fail-fast enforced in code; this is a "don't" via written policy, not a guard. |
 | `DEV_ROTATE_JWT_ON_RESTART` | Leave `false` | `false` | Ignored in production regardless of value; keep `false` for clarity. |
 | `SONIOX_UPLOAD_TIMEOUT` / `SONIOX_POLL_REQUEST_TIMEOUT` / `SONIOX_TRANSCRIPTION_INIT_TIMEOUT` | Optional | defaults in `.env.production.example` | Network timeouts to Soniox. Only worth touching if you see spurious timeouts against your production network path. |
+
+
+### How `ENV` and `.env.production` actually reach the process
+
+`config.py` loads `.env.<ENV>` (e.g. `.env.production`) if it exists, falling
+back to plain `.env`. **`ENV` itself must already be a real process
+environment variable** - the app has to know which `ENV` it's in before it can
+know which file to load, so `ENV=production` written *inside*
+`.env.production` is a no-op on some paths. What counts as "real" depends on
+how you start the app:
+
+- **Bare `uvicorn`/`python`, no container** - set it on the process directly:
+  `ENV=production uvicorn ...`. Putting it in `.env.production` does nothing
+  here; nothing has told the process to load that file yet.
+- **`docker-compose.prod.yml`** - `web`'s `env_file: .env.production` line
+  injects every line of that file, `ENV=production` included, as real
+  container process env vars before the app starts. You do **not** also need
+  `-e ENV=production`. This is a different mechanism from the top-level
+  `--env-file .env.production` flag on the `docker compose` command line,
+  which only affects `${VAR}` substitution inside the YAML itself (e.g.
+  `${POSTGRES_USER}`) - see this repo's `docker-compose.prod.yml` header
+  comment. Both point at the same file; they do different jobs, and both are
+  needed.
+- **Plain `docker run`** - neither applies. Pass
+  `--env-file .env.production -e ENV=production` explicitly.
+
+Getting this wrong is what silently starts the app in `development` mode: a
+generated JWT secret, an auto-created admin, and every production fail-fast
+guard bypassed - with no startup error, because `development` is a valid mode.
+§7's gate checklist proves it didn't happen (blank out `JWT_SECRET` and
+confirm the app refuses to start).
+
+### Single combined container (no Compose)
+
+Supported, but you own TLS, and Postgres/Redis/MinIO have to be reachable from
+this container by real endpoints (`DATABASE_URL`/`REDIS_URL`/`MINIO_*` in
+`.env.production`) - there's no Compose network resolving service names here.
+A bare `docker build .` produces the lean backend-only image (the Dockerfile's
+default target), so this path needs the combined target named explicitly:
+
+```bash
+docker build --target backend-with-frontend -t zenoscribe .
+docker run -p 8000:8000 -e ENV=production --env-file .env.production zenoscribe
+```
+
+`STORAGE_BACKEND` must still be `minio` - the app refuses to start with
+`local`, which isn't shared across anything. No recordings volume is needed:
+the only thing the container writes locally is an ephemeral live-session
+scratch file, gone when that session ends (`config.live_scratch_dir()`);
+durable data lives in MinIO and Postgres, both external to the container.
+
+Both this image and the default `backend` image run as a non-root user
+(`USER app` in the Dockerfile) with `--workers 1` pinned deliberately - see
+the Dockerfile's comments for why raising the worker count per container is
+unsafe without further changes. Scale by running more containers instead (§5).
 
 ---
 
@@ -88,7 +144,7 @@ all.** This changed from the previous "auto-apply on every startup"
 behavior once more than one `web` replica became a supported topology:
 concurrent, uncoordinated `alembic upgrade head` calls from several
 replicas starting at once could race against the same database
-(`SCALABILITY_AUDIT.md` finding F4). Now, `docker compose ... up` runs
+(`docs/audits/SCALABILITY_AUDIT.md` finding F4). Now, `docker compose ... up` runs
 `migrate` to completion first (it exits 0 and stays stopped — this is
 expected, not a crash), and `web`'s own startup hook only *verifies* the
 schema is already at the exact revision the code expects
@@ -251,14 +307,14 @@ afterward.
 - **`web` can now run multiple replicas** (see "Scaling" below) - recording
   storage (MinIO), rate limiting (Redis), and session validity
   (`SERVER_BOOT_ID`, now a required shared value) are all shared across
-  replicas. This is new; see `SCALABILITY_AUDIT.md`/`SCALABILITY_DESIGN.md`/
-  `HORIZONTAL_SCALABILITY_READINESS.md` for exactly what was changed, what
+  replicas. This is new; see `docs/audits/SCALABILITY_AUDIT.md`/`docs/audits/SCALABILITY_DESIGN.md`/
+  `docs/audits/HORIZONTAL_SCALABILITY_READINESS.md` for exactly what was changed, what
   was verified, and what remains UNVERIFIED without a real multi-container
   run on your VM. Docker itself is available in this repo's tool environment
   as of 2026-08-25 (confirmed working against the **dev** stack,
   `docker-compose.yml`) - what's still unrun is `docker-compose.prod.yml`
   specifically, multi-replica or otherwise; see
-  `DEPLOYMENT_READINESS_AUDIT.md`'s P1-B. `db` and `redis`/`minio`
+  `docs/audits/DEPLOYMENT_READINESS_AUDIT.md`'s P1-B. `db` and `redis`/`minio`
   themselves are each still a single instance - see "If you scale beyond
   one VM" below for what that does and doesn't cover.
 - **Single uvicorn worker per container**, pinned explicitly in the
@@ -304,7 +360,7 @@ validates the same `SERVER_BOOT_ID` (a required, shared env var — no more
 per-process random values). `frontend/nginx.conf`'s `resolver`/`$backend`
 directives are what make nginx actually spread requests across however many
 replicas Docker's embedded DNS reports, instead of pinning to whichever one
-resolved first — see that file's comment and `SCALABILITY_AUDIT.md` finding
+resolved first — see that file's comment and `docs/audits/SCALABILITY_AUDIT.md` finding
 F7 for why that would otherwise silently *not* work with a bare
 `proxy_pass http://web:8000`.
 
@@ -314,7 +370,7 @@ now available (installed 2026-08-25) and the **dev** stack
 multi-replica `docker-compose.prod.yml --scale` scenario has not; it's been
 reasoned through against the actual code and Docker/nginx's documented
 behavior, not observed. Before trusting it in production, run the
-multi-replica validation in `HORIZONTAL_SCALABILITY_READINESS.md` on your
+multi-replica validation in `docs/audits/HORIZONTAL_SCALABILITY_READINESS.md` on your
 VM: bring up 3 replicas, confirm login/recordings/downloads work regardless
 of which replica answers, confirm a shared rate limit actually holds across
 all three, and confirm killing one replica doesn't disrupt users on the
@@ -345,7 +401,7 @@ cost that implies) or introduce connection pooling in front of Postgres
 step if you outgrow this table.
 
 **Workers.** There is no background job queue/worker fleet in this
-architecture, deliberately — see `SCALABILITY_DESIGN.md` §1 for why: batch
+architecture, deliberately — see `docs/audits/SCALABILITY_DESIGN.md` §1 for why: batch
 upload transcription already scales linearly with replica count via its own
 per-process bounded thread pool (`routes_api.py`'s `_UPLOAD_EXECUTOR`), and
 live transcription/translation is an inherently synchronous bidirectional
@@ -379,7 +435,7 @@ when reasoning about failure modes:
 
 Full evidence, file:line citations, and the complete current finding set
 (P0/P1/P2/Notes, verified vs. unverified) live in
-`DEPLOYMENT_READINESS_AUDIT.md`. That doc used to be a frozen dated snapshot
+`docs/audits/DEPLOYMENT_READINESS_AUDIT.md`. That doc used to be a frozen dated snapshot
 with this section carrying the live fixed/open status separately — as of
 2026-08-24 it's rewritten in place instead, so it's now the one evergreen
 source for "is this finding still open," and this section is no longer
@@ -419,7 +475,7 @@ also tracked in §3 below.
       confirm `web` refuses to start each time, then restore the real values.
 - [ ] **Multi-replica validation, if you intend to run more than one `web`
       replica** — see §5's "Scaling" section and
-      `HORIZONTAL_SCALABILITY_READINESS.md` for the exact procedure. This is
+      `docs/audits/HORIZONTAL_SCALABILITY_READINESS.md` for the exact procedure. This is
       new, UNVERIFIED-until-you-run-it work; don't skip it just because a
       single replica passed the rest of this gate.
 - [ ] **Restart behaviour on an active session** — see §2's "Restart

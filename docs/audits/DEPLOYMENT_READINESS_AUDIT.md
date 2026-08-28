@@ -75,10 +75,10 @@ left-most entry.
 `uvicorn/middleware/proxy_headers.py:169-187`'s `get_trusted_client_address` returns
 `x_forwarded_for_hosts[0]` (the left-most / attacker-supplied entry) whenever
 `always_trust` is set, which it is here (`Dockerfile:124` — `--forwarded-allow-ips="*"`).
-[voice_transcriber/routes_api.py:86](voice_transcriber/routes_api.py#L86)
+[voice_transcriber/routes_api.py:86](../../voice_transcriber/routes_api.py#L86)
 (`client_ip = request.client.host`, feeding `count_recent_failed_logins`/
 `record_failed_login`) and
-[voice_transcriber/rate_limit.py:107-109](voice_transcriber/rate_limit.py#L107-L109)
+[voice_transcriber/rate_limit.py:107-109](../../voice_transcriber/rate_limit.py#L107-L109)
 (`scope.get("client")`, the global per-IP rate limiter) both read exactly the field
 `ProxyHeadersMiddleware` overwrites from that header. A forged `X-Forwarded-For` would
 have let an attacker evade both the failed-login lockout and the global rate limiter, or
@@ -129,7 +129,7 @@ localhost. Treat this stack as unverified until that happens once.
 
 ### P1-C. Unbounded recordings disk growth has no automated monitoring
 
-**Evidence:** [transcribe.py:143-145](voice_transcriber/transcribe.py#L143-L145) — 16kHz,
+**Evidence:** [transcribe.py:143-145](../../voice_transcriber/transcribe.py#L143-L145) — 16kHz,
 16-bit, mono PCM WAV ⇒ 32,000 bytes/sec ⇒ **~115MB per concurrent live-session hour**.
 `DEPLOYMENT.md` §3 documents this as a manual watch; no cron, alert, or retention job
 exists anywhere in `scripts/` (`reconcile_recordings.py` only reconciles DB/file drift,
@@ -162,9 +162,9 @@ remaining). Set it up before go-live, same as P1-C.
 ## Fixed (verified, not just doc-claimed)
 
 - **Blocking DB/bcrypt calls on the single event loop — Fixed.** Confirmed directly in
-  code, not taken on the doc's word: [auth.py:135](voice_transcriber/auth.py#L135)
+  code, not taken on the doc's word: [auth.py:135](../../voice_transcriber/auth.py#L135)
   (`await asyncio.to_thread(db.touch_seen, ...)`),
-  [routes_api.py:99](voice_transcriber/routes_api.py#L99) (`await
+  [routes_api.py:99](../../voice_transcriber/routes_api.py#L99) (`await
   asyncio.to_thread(auth.verify_password, ...)`), and every other `db.*`/`bcrypt.*` call
   site in `routes_api.py`/`auth.py` now run through `asyncio.to_thread`, matching the
   pattern `transcribe.py` already used. Full `pytest -q`: **81 passed, 21 deselected**,
@@ -217,7 +217,7 @@ remaining). Set it up before go-live, same as P1-C.
   The gate checklist already asks for a tag per deploy — actually doing it, and ideally
   pushing built images to a registry, would make an incident-time rollback faster.
 - **`/healthz` degradation has no automated remediation.**
-  [server.py:187-200](voice_transcriber/server.py#L187-L200) correctly 503s when
+  [server.py:187-200](../../voice_transcriber/server.py#L187-L200) correctly 503s when
   `db.ping()` fails, and the Compose healthcheck marks `web` unhealthy — but `restart:
   unless-stopped` triggers on container *exit*, not failed healthcheck, so a sustained DB
   outage leaves `web` running and serving 503s rather than being cycled or alerting.
@@ -235,7 +235,7 @@ remaining). Set it up before go-live, same as P1-C.
 
 - **Ownership/authorization checks are consistent and correctly fail closed to 404.**
   Every recording route goes through `_authorize_recording()`
-  ([routes_api.py:325-332](voice_transcriber/routes_api.py#L325-L332)), 404s (not 403s) on
+  ([routes_api.py:325-332](../../voice_transcriber/routes_api.py#L325-L332)), 404s (not 403s) on
   a mismatched `user_id`. `rec_id` is only ever an exact-match DB lookup key, never
   path-concatenated. Every `/api/admin/*` route requires `Depends(auth.current_admin)`
   server-side; the frontend's `RequireAuth adminOnly` is UX convenience, not the
