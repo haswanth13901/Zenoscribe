@@ -26,7 +26,8 @@ per user; an admin can see and manage everything.
   delete (with cascade), view all recordings, filter by user, date, and
   source.
 - **Presence** — `last_seen` per user, shown as online/offline in the admin
-  table.
+  table. Refreshed at most once per `LAST_SEEN_DEBOUNCE_SEC` (default 60s)
+  rather than on every request.
 - **Date and source filtering** in both the user history drawer and the
   admin console.
 
