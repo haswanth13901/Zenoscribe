@@ -22,7 +22,8 @@ from . import config as app_config
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # The set of valid `recordings.source` values - what produced the recording.
-# Kept here (not just as a DB CHECK constraint) so routes_api.py can validate
+# Kept here (not just as a DB CHECK constraint) so routers/recordings.py can
+# validate
 # an incoming filter value without a round-trip to Postgres.
 RECORDING_SOURCES = ("transcribe", "translate", "upload")
 
@@ -416,7 +417,8 @@ def list_recordings(user_id=None, date_from=None, date_to=None, source=None, lim
 
     date_from / date_to are ISO date strings (YYYY-MM-DD), interpreted as
     UTC calendar days. The range is inclusive of both ends. Raises ValueError
-    on a malformed date string - callers (routes_api.py) are expected to
+    on a malformed date string - callers (routers/recordings.py) are expected
+    to
     translate that into an HTTP 400 rather than letting it become a 500.
     """
     where = []

@@ -100,7 +100,8 @@ def test_recording_payload_includes_source(client, seeded_recording):
 def test_own_user_source_filter_excludes_other_users_and_types(
     client, mixed_source_recordings,
 ):
-    """A non-admin's My recordings view: scoped to self (routes_api.py's
+    """A non-admin's My recordings view: scoped to self
+    (routers/recordings.py's
     `scope = ... else user["id"]`) *and* filtered by source, composed.
     alice is already seeded by the mixed_source_recordings fixture."""
     headers = _login(client, "alice", "AlicePass123!")

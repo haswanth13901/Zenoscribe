@@ -28,7 +28,8 @@ class LocalStorageService:
         dest.parent.mkdir(parents=True, exist_ok=True)
         # shutil.move handles the common case (same filesystem - a cheap
         # rename) and falls back to copy+delete across filesystems/drives,
-        # matching what routes_api.py's upload path already relied on before
+        # matching what routers/uploads.py's upload path already relied on
+        # before
         # this abstraction existed.
         shutil.move(str(local_path), str(dest))
 

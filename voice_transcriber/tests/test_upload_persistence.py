@@ -1,4 +1,5 @@
-"""_persist_upload_recording (routes_api.py): the WAV/transcript/DB-row
+"""_persist_upload_recording (defined in routers/uploads.py, reached here
+via routes_api's re-export): the WAV/transcript/DB-row
 persistence that a successful /api/transcribe or /api/transcribe/translate
 call now runs, plus end-to-end coverage through both routes.
 
