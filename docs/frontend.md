@@ -139,19 +139,42 @@ Frontend tests:
 npm --prefix frontend run test
 ```
 
-Formatting (Prettier; not enforced in CI yet, run before committing):
+Formatting (Prettier). This **is** enforced in CI - `format:check` runs as a
+blocking step in `ci.yml`'s `frontend-unit` job, which feeds the
+`Dev checks passed` aggregator, so a formatting drift fails the PR the same
+way `flake8` does on the backend:
 
 ```bash
 npm --prefix frontend run format        # rewrite in place
-npm --prefix frontend run format:check  # CI-style check, no writes
+npm --prefix frontend run format:check  # exactly what CI runs
 ```
 
-There's deliberately no `lint` script yet: `typescript-eslint` doesn't
-support TypeScript 7 (this project's compiler) as of this writing - it
-hard-errors on import rather than degrading gracefully. Revisit once
-[their TS 7 support lands](https://github.com/typescript-eslint/typescript-eslint/issues/10940);
-`tsc -b`'s own `strict`/`noUnusedLocals`/`noUnusedParameters` in the
-meantime catch a meaningful chunk of what a linter would.
+There's deliberately no `lint` script and no ESLint. `typescript-eslint`
+cannot run against this project's compiler, and the failure is a hard one -
+not a degraded mode you can work around:
+
+```
+$ npm install --legacy-peer-deps typescript@7 typescript-eslint@8.68.0
+$ npx eslint probe.ts
+typescript-eslint does not support TS 7.0.
+Error: typescript-eslint does not support TS 7.0.
+    at Object.<anonymous> (node_modules/typescript-eslint/dist/index.js:52:11)
+```
+
+npm won't even resolve the tree without `--legacy-peer-deps`:
+typescript-eslint 8.68.0 declares `typescript: ">=4.8.4 <6.1.0"` and this
+project is on `^7.0.2`. TypeScript 7 is the Go rewrite - its package exports
+`./unstable/*` surfaces rather than the old compiler API that
+typescript-eslint is built on, which is why this is a rewrite-level gap and
+not a version-range oversight.
+
+The side-by-side escape hatch Microsoft documents means pinning `typescript`
+to 6.0.3 (the last release carrying the JS compiler API) for tooling - i.e.
+building the frontend with TS 6. Downgrading the compiler to unblock a
+linter is the wrong trade; see issue #28. Until
+[typescript-eslint ships TS >=7.1 support](https://github.com/typescript-eslint/typescript-eslint/issues/10940),
+`tsc -b`'s own `strict`/`noUnusedLocals`/`noUnusedParameters` catch a
+meaningful chunk of what a linter would.
 
 ## Source layout (Feature-Sliced Design)
 
