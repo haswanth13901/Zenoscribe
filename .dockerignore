@@ -27,10 +27,8 @@ app.db
 *.sqlite3
 voice_transcriber/recordings/
 
-# Not needed at runtime; code_reviews/ is internal critique of the codebase's
-# own weak points and shouldn't ship inside a running container.
+# Not needed at runtime.
 voice_transcriber/tests/
-voice_transcriber/code_reviews/
 
 # Editors
 .vscode/
