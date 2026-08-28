@@ -149,32 +149,134 @@ npm --prefix frontend run format        # rewrite in place
 npm --prefix frontend run format:check  # exactly what CI runs
 ```
 
-There's deliberately no `lint` script and no ESLint. `typescript-eslint`
-cannot run against this project's compiler, and the failure is a hard one -
-not a degraded mode you can work around:
+## Linting (ESLint) - optional, not installed
+
+There is no `lint` script and no ESLint dependency in this project. That's a
+deliberate default, not an oversight, and it's reversible in about five
+minutes - the steps below are verified against this codebase.
+
+### What you actually gain
+
+Less than you might expect, because two gates already cover most of it:
+
+| Concern | Already covered by |
+|---|---|
+| Formatting / style drift | Prettier's `format:check`, blocking in CI |
+| Unused variables and parameters | `tsc -b` with `noUnusedLocals` / `noUnusedParameters` |
+| Type errors, null safety | `tsc -b` with `strict` |
+
+The one gap neither of those can close is **React hooks correctness**, via
+`eslint-plugin-react-hooks`:
+
+- `rules-of-hooks` - a hook called conditionally, or inside a loop or a
+  nested function. Perfectly well-typed, and wrong.
+- `exhaustive-deps` - a `useEffect`/`useCallback`/`useMemo` dependency array
+  that omits something the body reads, giving you a stale closure.
+
+TypeScript cannot catch either: both are valid programs, they just don't do
+what the author meant. That matters more here than in a typical CRUD
+frontend, because `features/recorder/model/useRecorderConnection.ts` and
+`features/translate/model/useTranslateConnection.ts` drive WebSocket
+lifecycles, `AudioContext` setup and audio worklets from inside hooks. A
+stale closure there doesn't throw - it silently keeps a dead socket open or
+opens a second one, which is the same class of bug as the double-start race
+found in the original code review.
+
+If you're not touching those hooks, the marginal value over `tsc` + Prettier
+is genuinely small.
+
+### What blocks the *usual* setup - and why it doesn't block ESLint
+
+The standard React+TS ESLint stack is built on `typescript-eslint`, and that
+cannot run here. It declares `typescript: ">=4.8.4 <6.1.0"` while this
+project is on `^7.0.2`, so npm won't resolve the tree; forced past that with
+`--legacy-peer-deps` it hard-errors on import rather than degrading:
 
 ```
-$ npm install --legacy-peer-deps typescript@7 typescript-eslint@8.68.0
-$ npx eslint probe.ts
 typescript-eslint does not support TS 7.0.
-Error: typescript-eslint does not support TS 7.0.
     at Object.<anonymous> (node_modules/typescript-eslint/dist/index.js:52:11)
 ```
 
-npm won't even resolve the tree without `--legacy-peer-deps`:
-typescript-eslint 8.68.0 declares `typescript: ">=4.8.4 <6.1.0"` and this
-project is on `^7.0.2`. TypeScript 7 is the Go rewrite - its package exports
-`./unstable/*` surfaces rather than the old compiler API that
-typescript-eslint is built on, which is why this is a rewrite-level gap and
-not a version-range oversight.
+This is a rewrite-level gap, not a stale version range: TypeScript 7 is the
+Go rewrite, and its package exports `./unstable/*` surfaces instead of the
+old JS compiler API `typescript-eslint` is built on. Tracking issue:
+[typescript-eslint#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940),
+now scoped to TS >=7.1. Microsoft's documented side-by-side workaround means
+pinning `typescript` to 6.0.3 for tooling - i.e. building the frontend with
+TS 6, which is a compiler downgrade to satisfy a linter and not worth it.
 
-The side-by-side escape hatch Microsoft documents means pinning `typescript`
-to 6.0.3 (the last release carrying the JS compiler API) for tooling - i.e.
-building the frontend with TS 6. Downgrading the compiler to unblock a
-linter is the wrong trade; see issue #28. Until
-[typescript-eslint ships TS >=7.1 support](https://github.com/typescript-eslint/typescript-eslint/issues/10940),
-`tsc -b`'s own `strict`/`noUnusedLocals`/`noUnusedParameters` catch a
-meaningful chunk of what a linter would.
+**But `typescript-eslint` is only needed for type-aware rules.** The hooks
+rules work purely on the syntax tree, so swapping in Babel's parser - which
+reads TypeScript syntax without ever loading the TypeScript compiler - gets
+you the rules that matter, today, on TS 7.
+
+### Installing it
+
+```bash
+npm --prefix frontend install --save-dev \
+  eslint eslint-plugin-react-hooks \
+  @babel/core @babel/eslint-parser \
+  @babel/preset-typescript @babel/preset-react
+```
+
+Create `frontend/eslint.config.js`:
+
+```js
+import babelParser from "@babel/eslint-parser";
+import reactHooks from "eslint-plugin-react-hooks";
+
+export default [
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    languageOptions: {
+      parser: babelParser,
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          presets: ["@babel/preset-typescript", "@babel/preset-react"],
+          filename: "file.tsx",
+        },
+      },
+    },
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
+    },
+  },
+];
+```
+
+`requireConfigFile: false` and the inline `filename` matter - without them
+Babel looks for a project `babel.config.json` this repo doesn't have, and
+can't tell `.ts` from `.tsx`.
+
+Add to `frontend/package.json`:
+
+```json
+"lint": "eslint src"
+```
+
+To gate it in CI, add a step to `ci.yml`'s `frontend-unit` job next to the
+Prettier one. That job already feeds the `Dev checks passed` aggregator, so
+no branch-protection change is needed:
+
+```yaml
+      - name: Lint (ESLint)
+        run: npm --prefix frontend run lint
+```
+
+### Status when this was last checked
+
+Run against all 98 `.ts`/`.tsx` files under `frontend/src/`: **clean, exit
+0**. Both rules were confirmed to actually fire by linting a file with a
+conditional `useEffect` and a missing dependency, so the clean result is
+real coverage rather than a silently mis-parsed config. Versions used:
+`eslint@10.9.1`, `eslint-plugin-react-hooks@7.1.1`,
+`@babel/eslint-parser@8.0.1`.
+
+Adopting this needs no code cleanup - only the dependency, the config, the
+script, and optionally the CI step.
 
 ## Source layout (Feature-Sliced Design)
 

@@ -98,13 +98,14 @@ jobs:
       - name: Install dependencies
         run: npm --prefix frontend ci
 
-      # Prettier only - no ESLint yet. typescript-eslint (8.68.0, latest)
-      # declares `typescript: ">=4.8.4 <6.1.0"` and hard-errors on import
-      # against this project's typescript@^7.0.2; the only way to satisfy it
-      # is to build the frontend with typescript@6.0.3 instead, and
-      # downgrading the compiler purely to unblock a linter is the wrong
-      # trade (see issue #28, deferred until typescript-eslint supports
-      # TS >=7.1).
+      # Prettier only - ESLint is deliberately not installed. tsc -b's
+      # strict/noUnusedLocals/noUnusedParameters plus this Prettier gate
+      # cover most of what a linter would flag here; the one real gap is
+      # eslint-plugin-react-hooks. docs/frontend.md's "Linting (ESLint)"
+      # section documents that trade-off and carries verified install steps
+      # (Babel's parser, not typescript-eslint, which cannot run against
+      # TypeScript 7) for whenever it's wanted - including the two lines to
+      # add here.
       #
       # This step is what gates frontend formatting: `format:check` sat in
       # package.json unused from the day the frontend was set up, leaving
