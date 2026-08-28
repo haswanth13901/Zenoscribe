@@ -15,7 +15,7 @@ the Compose setup — this is the one current doc, don't split back into two.
 | `migrate` | same image as `web` | One-shot: applies Alembic migrations, then exits. `web` waits for this to succeed before starting - see "Migrations" below |
 | `web` | built from the repo root `Dockerfile` (its default `backend` target) | API/WS only - `/api/*`, `/ws`, `/ws/translate`, `/healthz`. No page-serving. Stateless - safe to run multiple replicas of, see "Scaling" |
 | `nginx` | built from `frontend/Dockerfile` (nginx) | TLS termination, routing (`/api/*`/`/healthz`/`/ws*` to `web`, everything else served locally), security headers, and the SPA shell/login page/static assets - see `frontend/nginx.conf` |
-| `certbot` | stock `certbot/certbot`, no custom Dockerfile | Obtains and renews the Let's Encrypt certificate `nginx` serves - see §2's "First-boot TLS bootstrap" |
+| `certbot` | stock `certbot/certbot`, no custom Dockerfile | Obtains and renews the Let's Encrypt certificate `nginx` serves - see §2.2, step 1 |
 
 See also: `README.md`'s "Production" section (how to run it); under
 `docs/audits/`, the `SCALABILITY_AUDIT.md`/`SCALABILITY_DESIGN.md`/
@@ -36,7 +36,7 @@ git-ignored.
 |---|---|---|---|
 | `DOMAIN` | Required | `app.example.com` | Used by `scripts/init-letsencrypt.sh` and the `certbot` service's `-d` flag. Must also be hand-edited into `frontend/nginx.conf` (see that file's header comment) - left mismatched between the two, certbot requests a cert for a domain nginx isn't configured to answer for. |
 | `CERTBOT_EMAIL` | Required | *(a monitored address)* | Let's Encrypt's only channel for expiry/registration notices. Unlike Caddy's old automatic renewal, a broken `certbot` renewal loop here fails silently otherwise - this email is the one warning you get before the cert lapses. |
-| `ENV` | Required | `production` | Wrong/unset → app boots in `development` mode: generated JWT secret, auto-created admin with a printed password, every fail-fast guard below silently skipped. No startup error, because dev mode is a *valid* mode. See README's ".env.production reaches the container" section for how this actually gets set under Compose — it is not simply "put ENV=production in the file." |
+| `ENV` | Required | `production` | Wrong/unset → app boots in `development` mode: generated JWT secret, auto-created admin with a printed password, every fail-fast guard below silently skipped. No startup error, because dev mode is a *valid* mode. See "How `ENV` and `.env.production` actually reach the process" below for how this actually gets set under Compose — it is not simply "put ENV=production in the file." |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Required (Compose path) | `zenoscribe` / *(strong, generated)* / `zenoscribe` | Used by `docker-compose.prod.yml` for both the `db` container and to build `web`'s `DATABASE_URL`. Left at the `zenoscribe`/`zenoscribe` dev default (public in this repo's git history) → production database is reachable with a publicly known password to anyone who can reach port 5432. Firewall it regardless (see §3) — this is defense in depth, not a substitute. |
 | `DATABASE_URL` | Required (non-Compose path only) | `postgresql://user:pass@host:5432/zenoscribe` | Missing → app refuses to start (fail-fast in `config.py`). Not needed if using `docker-compose.prod.yml`, which derives it from the three vars above. |
 | `SONIOX_API_KEY` | Required | *(from console.soniox.com)* | Missing → app refuses to start. Wrong/expired/revoked → app boots fine, passes health checks, then throws on the first user who hits record — a generic 500 with nothing in the app logs pointing at the real cause. Test it end-to-end (§7/gate item) before calling the deploy done. |
@@ -115,30 +115,198 @@ unsafe without further changes. Scale by running more containers instead (§5).
 
 ---
 
-## 2. Runbook
+## 2. Runbook — pre-deploy, deploy, post-deploy
 
-**First-boot TLS bootstrap.** Before the very first `docker compose ... up
--d`, run `./scripts/init-letsencrypt.sh` once (after filling in `DOMAIN`/
-`CERTBOT_EMAIL` in `.env.production` and hand-editing the domain into
-`frontend/nginx.conf`, per that file's header comment). This exists to
-break a chicken-and-egg problem: `nginx`'s TLS server block needs a
-certificate file just to start, but certbot can only obtain a real one by
-having `nginx` already up and serving the ACME challenge on port 80. The
-script writes a throwaway self-signed cert, starts `nginx` on it, requests
-the real certificate from Let's Encrypt, then reloads `nginx` onto it.
-Not needed again after that — the `certbot` service's own renew loop and
+First time through, read this in order: **2.1** is everything that must be
+true before you start, **2.2** is the deploy itself, **2.3**/**2.4** are the
+ten minutes after it, and **2.5** is every subsequent release. **2.6** onward
+is ongoing operation — migrations, volumes, backups, rollback, restarts.
+
+### 2.1 Pre-deployment checklist
+
+Nothing here touches the app; it's all groundwork that a deploy fails on if
+it's missing. §3 explains *why* each of these is yours to own.
+
+1. **A VM with Docker.** Ubuntu LTS, Docker Engine plus the Compose v2
+   plugin — every command in this doc is `docker compose` (v2), not the older
+   `docker-compose`. Confirm with `docker compose version`. Two vCPUs / 4 GB
+   RAM is a reasonable starting point; treat it as a starting point, not a
+   measured requirement, since no load or soak testing has been done (§4).
+   Size the disk for MinIO growth — recordings accumulate with no retention
+   policy (§3).
+2. **DNS, before anything else.** An A record for your `DOMAIN` pointing at
+   the VM's public IP, and actually resolving (`dig +short $DOMAIN`). Let's
+   Encrypt validates over HTTP-01 against that name in 2.2's bootstrap step,
+   so a record that hasn't propagated yet fails the bootstrap *and* spends
+   part of your rate-limit budget (5 certificates per domain per week). Set
+   `STAGING=1` on `scripts/init-letsencrypt.sh` to rehearse against Let's
+   Encrypt's staging environment first — untrusted cert, far higher limits.
+3. **Firewall.** Inbound 80 and 443 only. Ports 8000 (`web`), 5432 (`db`),
+   6379 (`redis`) and 9000/9001 (`minio`) must not be reachable from outside
+   the VM — `docker-compose.prod.yml` already keeps them off the host, but
+   confirm at the cloud/VM firewall layer too (§3).
+4. **Generate the secrets** (§3 — these are yours to issue and hold):
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(48))"   # JWT_SECRET
+   python -c "import secrets; print(secrets.token_urlsafe(16))"   # SERVER_BOOT_ID
+   ```
+   Plus a strong `POSTGRES_PASSWORD`, `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`,
+   `ADMIN_PASSWORD`, and a **newly issued** production `SONIOX_API_KEY` from
+   console.soniox.com — not the developer's dev key.
+5. **Fill in `.env.production`.** `cp .env.production.example .env.production`,
+   then every row marked Required in §1. Before moving on, confirm by eye:
+   `ENV=production`, `STORAGE_BACKEND=minio`, `ALLOW_TEST_HOOKS=false`,
+   `DEBUG_TOKENS=false`. The file is git-ignored — keep the filled-in copy in
+   your own secret store, never in the repo.
+6. **Hand-edit `DOMAIN` into `frontend/nginx.conf`.** It must match
+   `.env.production`'s `DOMAIN` exactly (see that file's header comment).
+   `scripts/init-letsencrypt.sh` greps for it and refuses to run if it's
+   missing, which is the check that catches this — but only at bootstrap
+   time.
+7. **Deploy a tagged commit, and confirm its gate is green.** `git fetch
+   --tags`, pick a `v*` tag, and check that `release-gate.yml` passed on it
+   (see §7's preamble for what that already proves — it saves you re-running
+   the test suites by hand).
+
+### 2.2 First deploy
+
+```bash
+git clone <repo-url> zenoscribe && cd zenoscribe
+git checkout v1.2.3                       # the tag from 2.1 step 7
+cp /your/secret/store/.env.production .   # filled in per 2.1 step 5
+```
+
+**Step 1 — First-boot TLS bootstrap.** Run this once, before the very first
+`up -d`:
+
+```bash
+./scripts/init-letsencrypt.sh
+```
+
+This exists to break a chicken-and-egg problem: `nginx`'s TLS server block
+needs a certificate file just to start, but certbot can only obtain a real
+one by having `nginx` already up and serving the ACME challenge on port 80.
+The script writes a throwaway self-signed cert, starts `nginx` on it,
+requests the real certificate from Let's Encrypt, then reloads `nginx` onto
+it. Not needed again after that — the `certbot` service's own renew loop and
 `nginx`'s periodic self-reload (both in `docker-compose.prod.yml`) keep the
 certificate current from then on, unmonitored unless you set up the check
 described in §3.
 
-**First boot.** Before `web` ever starts, the `migrate` service runs
-`db.init()` (all Alembic migrations) to completion — `web`'s `depends_on`
-requires this to succeed first (`docker-compose.prod.yml`). Once `web` is
-up, its own startup hook creates one admin user from
-`ADMIN_USERNAME`/`ADMIN_PASSWORD` via `auth.ensure_seed_admin()` — but
-*only* if no admin exists yet in the DB. Log in as that admin and create
-real user accounts from the admin console; there's no other user-creation
-path.
+**Step 2 — Bring up the stack.**
+
+```bash
+export APP_VERSION="$(git describe --tags --always)"
+export GIT_SHA="$(git rev-parse HEAD)"
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+```
+
+`APP_VERSION`/`GIT_SHA` are build args (`docker-compose.prod.yml` defaults
+them to `dev`/`unknown`) baked into the image and reported back by
+`GET /healthz`. Exporting them is what lets you confirm in 2.3 that the build
+you meant to deploy is the one running — skip them and every image reports
+`dev`, indistinguishable from the last one.
+
+The `--env-file` flag and `web`'s own `env_file:` line do two different jobs
+and both are needed — see §1's "How `ENV` and `.env.production` actually reach
+the process". Getting that wrong starts the app in development mode with no
+error at all.
+
+**Step 3 — `migrate` runs first, then `web`.** Before `web` ever starts, the
+`migrate` service runs `db.init()` (all Alembic migrations) to completion;
+`web`'s `depends_on: service_completed_successfully` is what enforces the
+ordering. `migrate` exits 0 and stays stopped — that's success, not a crash.
+
+**Step 4 — Create the real users.** Once `web` is up, its startup hook creates
+one admin from `ADMIN_USERNAME`/`ADMIN_PASSWORD` via
+`auth.ensure_seed_admin()` — but *only* if no admin exists yet in the DB. Log
+in as that admin and create real accounts from the admin console; there's no
+other user-creation path.
+
+### 2.3 Verify the deploy
+
+Run these immediately, before anything else:
+
+```bash
+C="docker compose --env-file .env.production -f docker-compose.prod.yml"
+
+$C ps
+# Expect six services Up (db, redis, minio, web, nginx, certbot)
+# and migrate as Exited (0) - that one is correct, not a failure.
+
+curl -fsS "https://$DOMAIN/healthz"
+# {"status":"ok","database":"ok","version":"v1.2.3","git_sha":"<sha>"}
+
+$C logs --tail=50 web nginx
+```
+
+Reading the results:
+
+- **`version`/`git_sha` are `dev`/`unknown`** → you skipped 2.2's exports.
+  The deploy works, but you can no longer tell which build is running.
+- **`"status":"degraded"` (HTTP 503)** → `web` is up but can't reach
+  Postgres; check `db`'s health and `DATABASE_URL`.
+- **`"status":"shutting_down"` (HTTP 503)** → you caught a replica mid-drain;
+  re-check in a few seconds.
+- **`curl` fails at TLS** → the certificate step didn't finish; re-check 2.2
+  step 1, and that `DOMAIN` matches in both `.env.production` and
+  `frontend/nginx.conf`.
+
+Then work through §7's gate before calling the deploy done. Its
+`ENV=production` check is the one that catches a silently-development deploy,
+which nothing above will.
+
+### 2.4 Set up before you walk away
+
+None of this is automated by this repo, and each one is a way the deploy
+degrades quietly weeks later. §3 has the detail; this is the checklist:
+
+- [ ] **Postgres backups** on a schedule, stored off the VM (2.7).
+- [ ] **MinIO/recordings backup** on the same schedule, so the two restore
+      together (2.7).
+- [ ] **Certificate-expiry monitoring** (§3). `certbot` renews on its own but
+      will never tell you if that stopped working.
+- [ ] **External `/healthz` monitoring that pages a human** (§3). Docker's
+      `restart: unless-stopped` only reacts to a container *exiting*, not to a
+      failing healthcheck — a sustained DB outage leaves `web` running and
+      quietly serving 503s.
+- [ ] **Disk-usage alerting** for `miniodata` (§3). Recordings grow without
+      bound; there is no retention policy in the app.
+
+### 2.5 Deploying a new release
+
+```bash
+C="docker compose --env-file .env.production -f docker-compose.prod.yml"
+
+# 1. Back up the database first - see 2.7. Migrations apply automatically in
+#    step 3; a restore is your real safety net, not downgrade().
+$C exec -T db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql
+
+# 2. Move to the new tag.
+git fetch --tags && git checkout v1.2.4
+
+# 3. Rebuild and restart, re-stamping the version.
+export APP_VERSION="$(git describe --tags --always)"
+export GIT_SHA="$(git rev-parse HEAD)"
+$C up -d --build
+
+# 4. Verify per 2.3 - including that /healthz now reports the new version.
+```
+
+What this does: rebuilds both images, re-runs `migrate` to completion whenever
+its image changed (applying any new migrations; a no-op if the schema is
+already current), then recreates `web` and `nginx`. **This is not
+zero-downtime** — `web` is replaced, not rolled, so expect a few seconds of
+502s. The outgoing container gets SIGTERM and drains active live sessions
+first, up to `GRACEFUL_SHUTDOWN_GRACE_SEC` (see 2.9).
+
+Always rebuild `web` and `nginx` together, which `up -d --build` does — a
+mismatched pair can leave the SPA shell referencing a bundle or route the
+running backend doesn't have. If a migration step is somehow skipped or only
+partly applied, `web` refuses to start rather than serving against the wrong
+schema (2.6) — that's the guard working, and the signal to roll back (2.8).
+
+### 2.6 How migrations run
 
 **Migrations are an explicit, one-time deploy step — not run by `web` at
 all.** This changed from the previous "auto-apply on every startup"
@@ -156,6 +324,8 @@ if a deploy's migration step was skipped or only partially completed,
 instead of silently serving requests against the wrong schema. Plan
 releases accordingly (e.g. test the image against a staging DB copy first)
 rather than expecting a pause point in production.
+
+### 2.7 Volumes, backups, and drift
 
 **Volume inventory** (`docker-compose.prod.yml`):
 - `pgdata` — Postgres data directory. Loss = loss of all users, recordings
@@ -221,39 +391,51 @@ It never touches the DB or deletes a DB row — a row pointing at a missing
 object is reported only, since guessing which object it should have
 pointed to isn't safe to automate.
 
-**Rollback.** Both existing migrations have a working `downgrade()`. To roll
-back a release:
+### 2.8 Rollback
+
+Both existing migrations have a working `downgrade()`. To roll back a
+release:
 1. Stop `web` and `nginx`: `docker compose -f docker-compose.prod.yml stop web nginx`
-2. Check out the previous release's code/images.
+2. Check out the previous release's tag, and re-export `APP_VERSION`/`GIT_SHA`
+   for it (2.2 step 2) so the rebuilt image is stamped with what it actually
+   is.
 3. Downgrade one revision: `alembic downgrade -1` (run inside a container
    with the previous code, against the same `DATABASE_URL`) — or to a
    specific revision: `alembic downgrade <revision>`.
-4. Start both on the previous images: `docker compose -f docker-compose.prod.yml up -d web nginx`
+4. Start both on the previous images: `docker compose --env-file
+   .env.production -f docker-compose.prod.yml up -d --build web nginx`
    (roll back together — a mismatched pair can mean the SPA shell references
    a bundle/route the running backend doesn't have, or vice versa). `web`
    will refuse to start if its `db.verify_schema_current()` check finds the
    schema doesn't match what the checked-out code expects — that's the
    guard working as intended, not a bug; it means the downgrade step above
    needs to actually run first.
+5. Verify per 2.3 — `/healthz` should now report the previous version.
 
-**Restart behaviour.** `SERVER_BOOT_ID` is now a required, fixed value
-(§1) — restarting a `web` replica (`docker compose restart web`, a crash, a
-host reboot) no longer logs out every currently-logged-in user, as long as
-every replica shares the same value (the normal case: they all read it from
-the same `.env.production`). On SIGTERM, a replica also drains gracefully
-for up to `GRACEFUL_SHUTDOWN_GRACE_SEC` (default 30s): it stops accepting
-new requests/WS connections immediately (`/healthz` reports
-`shutting_down`), asks any active live transcription/translation session to
-wrap up and persist its recording, then exits — see `server.py`/
-`live_sessions.py`. **This graceful-drain behavior is UNVERIFIED against a
-real SIGTERM/real active session** — it was implemented and unit-tested at
-the bookkeeping level (`live_sessions.py`), but this environment has no way
-to open a real live WebSocket session and send a real SIGTERM to prove the
-recording survives intact end-to-end. Test this on your VM before relying
-on it: start a live recording, run `docker compose -f
-docker-compose.prod.yml kill -s SIGTERM web` (or `restart`), and confirm
-the recording appears intact (not truncated/corrupted) in "My recordings"
-afterward.
+Nothing in this repo pushes images to a registry, so a rollback is a rebuild
+from source rather than an image swap. That works, but it's slower and more
+error-prone mid-incident; see §3's "Image registry" note if faster rollback
+matters to you.
+
+### 2.9 Restart behaviour
+
+`SERVER_BOOT_ID` is now a required, fixed value (§1) — restarting a `web`
+replica (`docker compose restart web`, a crash, a host reboot) no longer logs
+out every currently-logged-in user, as long as every replica shares the same
+value (the normal case: they all read it from the same `.env.production`). On
+SIGTERM, a replica also drains gracefully for up to
+`GRACEFUL_SHUTDOWN_GRACE_SEC` (default 30s): it stops accepting new
+requests/WS connections immediately (`/healthz` reports `shutting_down`),
+asks any active live transcription/translation session to wrap up and persist
+its recording, then exits — see `server.py`/`live_sessions.py`. **This
+graceful-drain behavior is UNVERIFIED against a real SIGTERM/real active
+session** — it was implemented and unit-tested at the bookkeeping level
+(`live_sessions.py`), but this environment has no way to open a real live
+WebSocket session and send a real SIGTERM to prove the recording survives
+intact end-to-end. Test this on your VM before relying on it: start a live
+recording, run `docker compose -f docker-compose.prod.yml kill -s SIGTERM
+web` (or `restart`), and confirm the recording appears intact (not
+truncated/corrupted) in "My recordings" afterward.
 
 ---
 
@@ -269,7 +451,7 @@ afterward.
   translation simply do not function over plain HTTP on a real domain.
   Point DNS at the VM, set `DOMAIN`/`CERTBOT_EMAIL` in `.env.production`
   and hand-edit the same domain into `frontend/nginx.conf`, then run
-  `./scripts/init-letsencrypt.sh` once (§2). After that, `certbot` renews
+  `./scripts/init-letsencrypt.sh` once (§2.2). After that, `certbot` renews
   automatically — but unlike Caddy, it won't warn you if that stops
   working. **Set up a certificate-expiry monitoring check** (e.g. a cron
   hitting `openssl s_client -connect $DOMAIN:443 -servername $DOMAIN
@@ -282,14 +464,16 @@ afterward.
   at the VM/cloud firewall layer too; don't rely on Compose alone.
 - **VM hardening** — SSH policy (keys only, no root login), unattended
   security upgrades, OS patching cadence.
-- **Database backups** — see §2. Nothing in this repo implements
+- **Database backups** — see §2.7. Nothing in this repo implements
   scheduling; that's yours.
-- **MinIO (recordings) backup** — see §2, and restore together with the DB.
+- **MinIO (recordings) backup** — see §2.7, and restore together with the DB.
 - **Disk monitoring.** Recordings/transcripts in MinIO grow without bound —
   there is no retention/deletion policy in the app. Watch `miniodata`'s
   disk usage on the VM.
-- **Monitoring and alerting** against `GET /healthz` (§1 of README's
-  Production section describes the response shape). Make sure it pages a
+- **Monitoring and alerting** against `GET /healthz` (`server.py`) — returns
+  `{"status", "database", "version", "git_sha"}`, HTTP 200 when healthy, 503
+  when the database is unreachable (`"degraded"`) or the replica is draining
+  (`"shutting_down"`). Make sure it pages a
   human — Docker's `restart: unless-stopped` only retries on container
   *exit*, not on a failed healthcheck, so a sustained DB outage leaves `web`
   running and quietly serving 503s/500s rather than restarting or alerting
@@ -297,7 +481,7 @@ afterward.
 - **Image registry.** `docker-compose.prod.yml` builds `web` and `frontend`
   from source; nothing here pushes either image to a registry. Rollback
   today means checking out the previous release and rebuilding both (works,
-  per §2, but slower and more error-prone mid-incident than an instant image
+  per §2.8, but slower and more error-prone mid-incident than an instant image
   swap). Push tagged images to a registry (GHCR/ECR/etc.) if faster rollback
   matters.
 
@@ -379,7 +563,7 @@ others.
 
 **Scaling down** works the same way: `--scale web=1` (or any smaller
 number) — Compose stops the excess containers. A replica mid-shutdown
-drains gracefully (see "Restart behaviour" in §2) before Compose considers
+drains gracefully (see §2.9, "Restart behaviour") before Compose considers
 it stopped, up to `GRACEFUL_SHUTDOWN_GRACE_SEC`/`stop_grace_period`.
 
 **`DB_POOL_MAX_SIZE` sizing** (§1) — each replica opens its own Postgres
@@ -443,27 +627,45 @@ with this section carrying the live fixed/open status separately — as of
 source for "is this finding still open," and this section is no longer
 duplicated here. The two operational items it currently flags as open —
 recordings disk-growth monitoring and certificate-expiry monitoring — are
-also tracked in §3 below.
+also tracked in §3 above.
 
 ---
 
 ## 7. Gate — run before calling a deploy done
 
+**What CI already proves, on every PR into `main`, every push to `main`, and
+every version tag** (`.github/workflows/release-gate.yml`) — don't re-do these
+by hand:
+
+- `docker-build` — builds the two images you actually ship, confirms the
+  backend image runs non-root, confirms **no real `.env`/`.env.production`
+  leaked into it** (only the `.example` files ship, which is intended), and
+  Trivy-scans both images.
+- `prod-config-guardrails` — boots the real built image with one variable
+  knocked out at a time and confirms each of `config.py`'s six fail-fast
+  guards actually fires: `DATABASE_URL`, `SONIOX_API_KEY`, `STORAGE_BACKEND`,
+  `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`, `REDIS_URL`, `ALLOW_TEST_HOOKS`.
+- `backend-integration` — the Playwright E2E suite. `dependency-audit` —
+  pip-audit/npm audit. `ci.yml` (Tier 1) covers flake8, the fast pytest suite,
+  and the frontend build/unit tests on the commit itself.
+
+So confirming the gate is green on your tag (§2.1, step 7) replaces re-running
+the suites locally. What remains below is only what CI structurally cannot
+check: your VM, your `.env.production`, your domain — plus the two guards that
+live in `auth.py` rather than `config.py` (`JWT_SECRET`/`SERVER_BOOT_ID`),
+which the guardrail matrix does **not** cover.
+
 - [ ] **Clean-clone test.** Fresh `git clone` into an empty directory,
-      `.env.production` filled in, `docker compose --env-file
-      .env.production -f docker-compose.prod.yml up -d --build`. Must come
-      up with no manual intervention and no step that exists only in
-      someone's shell history.
+      `.env.production` filled in, then §2.2's steps. Must come up with no
+      manual intervention and no step that exists only in someone's shell
+      history.
 - [ ] **Prove `ENV=production` actually took effect** — the single
-      highest-value check here. Temporarily blank `JWT_SECRET` and confirm
-      the app *refuses to start*. If it boots, it's running in development
+      highest-value check here, and the one CI cannot do for you, because it
+      tests *your env wiring*, not the code. Temporarily blank `JWT_SECRET`
+      and confirm `web` *refuses to start*; restore it, then repeat with
+      `SERVER_BOOT_ID` blanked. Both guards live in `auth.py` and are outside
+      CI's guardrail matrix. If either boots, you are running in development
       mode and every guard in §1 is silently off.
-- [ ] **Confirm no `.env` file is inside the built backend image**:
-      `docker run --rm <web image> ls -la /app` should show nothing but
-      `.env.example`/`.env.production.example` — no real `.env`/`.env.production`
-      (CI's `docker-build` job checks this automatically on every push — see
-      `.github/workflows/ci.yml`). `frontend`'s image has no equivalent risk —
-      its build only ever copies `frontend/` into the build stage.
 - [ ] **Container-replacement test.** `docker compose -f
       docker-compose.prod.yml down && up -d` — recordings and users must
       survive (this is exactly what the named volumes exist to guarantee;
@@ -471,17 +673,12 @@ also tracked in §3 below.
       services (`db`, `redis`, `minio`, `migrate`, `web`, `nginx`,
       `certbot`) must come back healthy (`migrate` exits 0 and stays
       stopped — that's success, not a crash).
-- [ ] **Confirm `STORAGE_BACKEND`/`REDIS_URL`/`SERVER_BOOT_ID` guards fire**
-      the same way the `JWT_SECRET` check above does: temporarily set
-      `STORAGE_BACKEND=local` (or blank `REDIS_URL`/`SERVER_BOOT_ID`) and
-      confirm `web` refuses to start each time, then restore the real values.
 - [ ] **Multi-replica validation, if you intend to run more than one `web`
       replica** — see §5's "Scaling" section and
       `docs/audits/HORIZONTAL_SCALABILITY_READINESS.md` for the exact procedure. This is
       new, UNVERIFIED-until-you-run-it work; don't skip it just because a
       single replica passed the rest of this gate.
-- [ ] **Restart behaviour on an active session** — see §2's "Restart
-      behaviour": confirm a `SERVER_BOOT_ID`-pinned restart doesn't log
+- [ ] **Restart behaviour on an active session** — see §2.9: confirm a `SERVER_BOOT_ID`-pinned restart doesn't log
       users out, and confirm a SIGTERM during a live recording persists it
       intact (both UNVERIFIED in this repo's own tool environment - see
       that section).
@@ -489,16 +686,12 @@ also tracked in §3 below.
       translate, upload, download a transcript. Mic capture cannot be
       validated any other way — `localhost` is exempt from the secure-context
       requirement, so a localhost-only test proves nothing about the real
-      domain. While here, confirm the served certificate is genuinely
+      domain. This is also the only real test of `SONIOX_API_KEY`: a wrong or
+      revoked key passes every health check and fails on the first user who
+      hits record. While here, confirm the served certificate is genuinely
       Let's Encrypt-issued, not `scripts/init-letsencrypt.sh`'s bootstrap
       self-signed one — browsers show this clearly (padlock, no warning);
       `openssl s_client -connect $DOMAIN:443 -servername $DOMAIN
       </dev/null 2>/dev/null | openssl x509 -noout -issuer` also confirms it.
-- [ ] **Full test suite green** on the exact commit deployed:
-      `python -m flake8 voice_transcriber scripts --max-line-length=120`,
-      `python -m pytest -q`, `python -m pytest -q -m integration` (the real
-      Playwright E2E suite - needs Postgres/Redis reachable and Playwright
-      browsers installed), `npm --prefix frontend run build`,
-      `npm --prefix frontend test`.
 - [ ] **Tag the release** you deploy — reference that tag in tickets/incident
       reports, not "whatever was on main."
