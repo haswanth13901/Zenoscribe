@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invariant with `nginx.conf`, and an env var would let an operator break it in
   production, at runtime, where no test can see it.
 
+- `UploadPanel` stacked results instead of replacing them. Each button cleared
+  only its own previous output, so clicking Transcribe & Translate after
+  Transcribe left the plain transcription sitting above the translation, with
+  nothing indicating which click produced which - the stale block read as part
+  of the new answer. Either action now clears the other's result and its error,
+  on click rather than on arrival, so exactly one result is on screen at a time.
+  Both buttons are also disabled while either request is in flight; previously
+  each disabled only itself, so two overlapping uploads could land in arbitrary
+  order and the later reply would overwrite whichever the user asked for last.
+
 ### Added
 
 - `voice_transcriber/tests/test_nginx_upload_timeout.py` parses

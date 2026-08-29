@@ -148,6 +148,71 @@ describe("UploadPanel", () => {
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
+  it("Transcribe & Translate replaces the previous transcription rather than stacking under it", async () => {
+    let call = 0;
+    server.use(
+      http.post("/api/transcribe/translate", () => {
+        call += 1;
+        return HttpResponse.json({
+          turns: [{ text: call === 1 ? "plain transcription" : "translated text" }],
+        });
+      }),
+    );
+    renderPanel();
+    await pickFile();
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+    await waitFor(() => expect(screen.getByText("plain transcription")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe & Translate" }));
+    await waitFor(() => expect(screen.getByText("translated text")).toBeInTheDocument());
+    expect(screen.queryByText("plain transcription")).not.toBeInTheDocument();
+  });
+
+  it("Transcribe replaces a previous translation too - only ever one result on screen", async () => {
+    let call = 0;
+    server.use(
+      http.post("/api/transcribe/translate", () => {
+        call += 1;
+        return HttpResponse.json({
+          turns: [{ text: call === 1 ? "translated text" : "plain transcription" }],
+        });
+      }),
+    );
+    renderPanel();
+    await pickFile();
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe & Translate" }));
+    await waitFor(() => expect(screen.getByText("translated text")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+    await waitFor(() => expect(screen.getByText("plain transcription")).toBeInTheDocument());
+    expect(screen.queryByText("translated text")).not.toBeInTheDocument();
+  });
+
+  it("clears the other action's stale error, not just its result", async () => {
+    let call = 0;
+    server.use(
+      http.post("/api/transcribe/translate", () => {
+        call += 1;
+        return call === 1
+          ? HttpResponse.json({ detail: "upstream exploded" }, { status: 502 })
+          : HttpResponse.json({ turns: [{ text: "translated text" }] });
+      }),
+    );
+    renderPanel();
+    await pickFile();
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("upload-transcribe-error")).toBeInTheDocument(),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe & Translate" }));
+    await waitFor(() => expect(screen.getByText("translated text")).toBeInTheDocument());
+    expect(screen.queryByTestId("upload-transcribe-error")).not.toBeInTheDocument();
+  });
+
   it("shows elapsed time and keep-the-tab-open copy while a transcription is in flight", async () => {
     server.use(
       http.post("/api/transcribe/translate", async () => {

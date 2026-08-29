@@ -53,8 +53,12 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
   const [transcribe, transcribeState] = useTranscribeTranslateMutation();
   const [transcribeAndTranslate, translateState] = useTranscribeTranslateMutation();
 
-  // Both buttons post to the same endpoint and only one can be in flight at
-  // a time (each disables itself while loading), so one timer covers both.
+  // Both buttons post to the same endpoint and both are disabled while
+  // either is running (see their `disabled` props), so at most one request
+  // is ever in flight and one timer covers both. That mutual disable is
+  // also what keeps the single-result rule below honest: two overlapping
+  // requests would land in arbitrary order and the later reply would
+  // silently overwrite whichever the user actually asked for last.
   // Same hook TranslatePage uses for its live-session clock rather than a
   // second ticking implementation - see useElapsedTimer's own comment on why
   // a clock stays local state and out of the reducer.
@@ -75,9 +79,20 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
     return Number.isFinite(n) && n > 0 ? n : undefined;
   }
 
+  // Exactly one result is on screen at a time: the newest. Each action used
+  // to clear only its own previous output, so a transcription and a
+  // translation could sit stacked on the page with nothing indicating which
+  // click produced which - and the older one looked like part of the new
+  // answer. Clearing happens on click rather than on arrival so the stale
+  // block is gone for the whole wait, matching what each action already did
+  // to its own result. reset() on the other mutation clears its *error* too;
+  // without it a failed Transcribe would keep rendering its message
+  // underneath a perfectly good translation.
   async function doTranscribe() {
     if (!file) return;
     setTranscribeResult(null);
+    setTranslateResult(null);
+    translateState.reset();
     try {
       const json = await transcribe({ file, numSpeakers: parsedNumSpeakers() }).unwrap();
       setTranscribeResult(json.turns);
@@ -89,6 +104,8 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
   async function doTranscribeAndTranslate() {
     if (!file) return;
     setTranslateResult(null);
+    setTranscribeResult(null);
+    transcribeState.reset();
     try {
       const json = await transcribeAndTranslate({
         file,
@@ -165,7 +182,7 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
               type="button"
               className={styles.button}
               onClick={doTranscribe}
-              disabled={!file || transcribeState.isLoading}
+              disabled={!file || inFlight}
             >
               {transcribeState.isLoading ? "Transcribing..." : "Transcribe"}
             </button>
@@ -187,7 +204,7 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
               type="button"
               className={styles.button}
               onClick={doTranscribeAndTranslate}
-              disabled={!file || translateState.isLoading}
+              disabled={!file || inFlight}
             >
               {translateState.isLoading
                 ? "Transcribing & translating..."
