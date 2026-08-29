@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-08-28
+
+Docs-only release. No code, config, or workflow changes.
+
+### Added
+
+- `DEPLOYMENT.md` §2.5 now covers the `frontend/nginx.conf` checkout collision.
+  §2.1 step 6 has the operator hand-edit `DOMAIN` into that file, and the edit
+  lives uncommitted in the VM's working tree; §2.5 step 2 then does a
+  `git checkout <tag>`. Git aborts that switch whenever the locally-modified
+  file also differs in the target tag - and the reflex that follows
+  (`git stash`, `git checkout -- .`) silently discards the domain, producing an
+  nginx pointed at `your-domain.example.com` with certificate paths that do not
+  exist. nginx then fails to start, and nginx is the whole edge, so it is an
+  outage rather than a degraded feature. The runbook now names the error, says
+  what not to do, and gives the re-apply sequence with a `grep -c` check before
+  the rebuild. This has never been reachable before: `frontend/nginx.conf` was
+  untouched from before 1.0.0 through 1.3.6, and 1.3.7 is the first release to
+  modify it.
+- `DEPLOYMENT.md` §4 documents the batch-upload timeout invariant alongside the
+  existing `client_max_body_size` note - the same reasoning applied to a second
+  pair of directives in the same file, with a pointer to the test that fails if
+  `BATCH_POLL_TIMEOUT` and `nginx.conf` drift apart, and to the client-disconnect
+  residual in the audit backlog.
+
+### Changed
+
+- `DEPLOYMENT.md` §1's Soniox timeout row now says which timeout is *not* there.
+  It listed the three env-configurable per-hop timeouts and advised touching
+  them "if you see spurious timeouts" - but the one that actually bounds a batch
+  upload, `BATCH_POLL_TIMEOUT`, is deliberately a module constant with no env
+  var, so an operator following that advice would find no knob and might add
+  one, breaking the two-file invariant in production where no test can see it.
+- Illustrative tags in `DEPLOYMENT.md` §2.2, §2.3 and §2.5 refreshed from the
+  `v1.2.x` line to the current one. They are examples rather than claims, but
+  five versions of drift made them read as stale.
+
 ## [1.3.7] - 2026-08-28
 
 ### Fixed

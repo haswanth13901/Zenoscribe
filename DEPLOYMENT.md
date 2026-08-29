@@ -56,7 +56,7 @@ git-ignored.
 | `RESTRICT_TEST_HOOK_TO_LOCALHOST` | Leave `true` | `true` | Same — irrelevant once `ALLOW_TEST_HOOKS` is (correctly) `false`. |
 | `DEBUG_TOKENS` | Must be `false` | `false` | If `true`, logs token text — which may contain user speech — into application logs. Not fail-fast enforced in code; this is a "don't" via written policy, not a guard. |
 | `DEV_ROTATE_JWT_ON_RESTART` | Leave `false` | `false` | Ignored in production regardless of value; keep `false` for clarity. |
-| `SONIOX_UPLOAD_TIMEOUT` / `SONIOX_POLL_REQUEST_TIMEOUT` / `SONIOX_TRANSCRIPTION_INIT_TIMEOUT` | Optional | defaults in `.env.production.example` | Network timeouts to Soniox. Only worth touching if you see spurious timeouts against your production network path. |
+| `SONIOX_UPLOAD_TIMEOUT` / `SONIOX_POLL_REQUEST_TIMEOUT` / `SONIOX_TRANSCRIPTION_INIT_TIMEOUT` | Optional | defaults in `.env.production.example` | Network timeouts for one Soniox hop each. Only worth touching if you see spurious timeouts against your production network path. **The overall batch budget is not here:** `soniox_client.BATCH_POLL_TIMEOUT` (150s) caps how long a `/api/transcribe*` request polls Soniox, and it is deliberately a module constant with no env var - see §4's note on the `/api/` proxy-timeout pair. If uploads of long files are timing out, that constant and `frontend/nginx.conf` have to move together; raising one alone re-creates the bug both were set up to prevent. |
 
 
 ### How `ENV` and `.env.production` actually reach the process
@@ -172,7 +172,7 @@ it's missing. §3 explains *why* each of these is yours to own.
 
 ```bash
 git clone <repo-url> zenoscribe && cd zenoscribe
-git checkout v1.2.3                       # the tag from 2.1 step 7
+git checkout v1.3.8                       # the tag from 2.1 step 7
 cp /your/secret/store/.env.production .   # filled in per 2.1 step 5
 ```
 
@@ -235,7 +235,7 @@ $C ps
 # and migrate as Exited (0) - that one is correct, not a failure.
 
 curl -fsS "https://$DOMAIN/healthz"
-# {"status":"ok","database":"ok","version":"v1.2.3","git_sha":"<sha>"}
+# {"status":"ok","database":"ok","version":"v1.3.8","git_sha":"<sha>"}
 
 $C logs --tail=50 web nginx
 ```
@@ -282,8 +282,10 @@ C="docker compose --env-file .env.production -f docker-compose.prod.yml"
 #    step 3; a restore is your real safety net, not downgrade().
 $C exec -T db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql
 
-# 2. Move to the new tag.
-git fetch --tags && git checkout v1.2.4
+# 2. Move to the new tag. If this aborts with "Your local changes to the
+#    following files would be overwritten by checkout", read the note below
+#    BEFORE reaching for `git stash` or `git checkout -- .`.
+git fetch --tags && git checkout v1.3.9
 
 # 3. Rebuild and restart, re-stamping the version.
 export APP_VERSION="$(git describe --tags --always)"
@@ -305,6 +307,42 @@ mismatched pair can leave the SPA shell referencing a bundle or route the
 running backend doesn't have. If a migration step is somehow skipped or only
 partly applied, `web` refuses to start rather than serving against the wrong
 schema (2.6) — that's the guard working, and the signal to roll back (2.8).
+
+**If step 2 refuses to check out, it is almost certainly `frontend/nginx.conf`.**
+2.1 step 6 has you hand-edit your `DOMAIN` into that file, and that edit lives
+in the VM's working tree, uncommitted. Git will not switch tags when a file you
+have modified locally also differs in the tag you are moving to, because doing
+so would discard your edit — so the checkout aborts. This is the safe failure;
+the dangerous move is the reflex that follows it. `git stash` or
+`git checkout -- .` will clear the block and silently take your domain with it,
+and the rebuild in step 3 then produces an nginx configured for
+`your-domain.example.com` with certificate paths that do not exist. nginx will
+not start at all, and nginx is the entire edge — that is a full outage, not a
+degraded feature.
+
+The fix is to re-apply the edit deliberately rather than lose it by accident:
+
+```bash
+# 2a. Only if step 2 aborted. Confirm nginx.conf is the only thing blocking it.
+git status --short
+
+# 2b. Take the tag's version of the file, then put your domain back into all
+#     four places (both server_name lines, both ssl_certificate paths).
+git checkout -- frontend/nginx.conf
+git fetch --tags && git checkout v1.3.9
+sed -i "s/your-domain\.example\.com/$DOMAIN/g" frontend/nginx.conf
+
+# 2c. Verify before building - four substitutions, zero placeholders left.
+grep -c "$DOMAIN" frontend/nginx.conf          # expect 4
+grep -c "your-domain.example.com" frontend/nginx.conf   # expect 0
+```
+
+Note this only bites on a release that actually changes `frontend/nginx.conf`.
+That file was untouched from before v1.0.0 through v1.3.6; v1.3.7 is the first
+release to modify it, so the first upgrade across that boundary is the first
+time this can happen. `scripts/init-letsencrypt.sh` greps for the placeholder
+and refuses to run, but that only guards the bootstrap in 2.2 — nothing checks
+it on a redeploy, which is why the `grep -c` in 2c is worth actually running.
 
 ### 2.6 How migrations run
 
@@ -515,6 +553,20 @@ truncated/corrupted) in "My recordings" afterward.
   `client_max_body_size` is set slightly above this so the app's own
   limit is always what actually rejects an oversized file, with a clear
   message).
+- **Batch uploads are synchronous, and two files must agree on how long one
+  may take.** `POST /api/transcribe` and `/api/transcribe/translate` await
+  Soniox inside the request, so processing time is request wall-clock.
+  `frontend/nginx.conf`'s `location /api/` sets `proxy_read_timeout`/
+  `proxy_send_timeout` to 600s, derived from the worst case a single request
+  can consume (~230s of Soniox hops in series) plus one full queued round
+  behind `_UPLOAD_EXECUTOR`'s three workers. Same shape of reasoning as
+  `client_max_body_size` above: the app's own timeout, which returns a clear
+  message, must be what rejects a slow upload - never the edge, which returns
+  a bare 504 while the backend runs on to completion and still saves the
+  recording. `voice_transcriber/tests/test_nginx_upload_timeout.py` fails if
+  the two drift apart, so treat them as one setting in two files. A genuine
+  client disconnect still leaves the work running; see the P2 backlog in
+  `docs/audits/DEPLOYMENT_READINESS_AUDIT.md`.
 - **`CREATE EXTENSION citext`** in the initial migration needs elevated
   Postgres privileges. Fine against the Compose-managed Postgres in this
   repo (superuser by default); it will fail against a managed Postgres
