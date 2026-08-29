@@ -204,9 +204,7 @@ describe("UploadPanel", () => {
     await pickFile();
 
     await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("upload-transcribe-error")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId("upload-transcribe-error")).toBeInTheDocument());
 
     await userEvent.click(screen.getByRole("button", { name: "Transcribe & Translate" }));
     await waitFor(() => expect(screen.getByText("translated text")).toBeInTheDocument());

@@ -227,8 +227,8 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
               <span className={styles.progressBar} aria-hidden="true" />
               <span>
                 {transcribeState.isLoading ? "Transcribing" : "Transcribing and translating"}
-                {elapsed ? ` - ${elapsed}` : ""}. Long recordings can take a few minutes;
-                please keep this tab open until it finishes.
+                {elapsed ? ` - ${elapsed}` : ""}. Long recordings can take a few minutes; please
+                keep this tab open until it finishes.
               </span>
             </div>
           )}
