@@ -5,6 +5,61 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Batch uploads over ~60s returned a 504 to the user while the backend went on
+  to succeed. `frontend/nginx.conf`'s `location /api/` set no proxy timeouts, so
+  it inherited nginx's default `proxy_read_timeout` of 60s - but
+  `POST /api/transcribe` and `/api/transcribe/translate` await Soniox
+  *synchronously inside the request* (`routers/uploads.py`), with
+  `soniox_client.BATCH_POLL_TIMEOUT` set to 600s. Every upload past a minute was
+  cut at the edge while the worker thread kept running, finished, and called
+  `_persist_upload_recording` - so the recording appeared in My Recordings after
+  the user had been told the upload failed, and the natural response (re-upload)
+  paid Soniox twice for one file. `location /api/` now sets
+  `proxy_read_timeout`/`proxy_send_timeout` to 600s, derived from the worst-case
+  request rather than picked: 230s of Soniox hops in series (upload, job
+  creation, the poll loop, transcript fetch, cleanup) plus one full queued round
+  behind `_UPLOAD_EXECUTOR`'s three workers, which `run_in_executor` fills with
+  no timeout of its own. Same reasoning `client_max_body_size` already used - the
+  app's own limit, which carries a message, must be what rejects a request,
+  never the edge.
+- `BATCH_POLL_TIMEOUT` lowered from 600s to 150s. It is synchronous request
+  wall-clock, not background work, so ten minutes was never a real setting -
+  only one nothing had reached. It stays a module constant rather than joining
+  its three env-configurable siblings on purpose: it is now half of a two-file
+  invariant with `nginx.conf`, and an env var would let an operator break it in
+  production, at runtime, where no test can see it.
+
+- `UploadPanel` stacked results instead of replacing them. Each button cleared
+  only its own previous output, so clicking Transcribe & Translate after
+  Transcribe left the plain transcription sitting above the translation, with
+  nothing indicating which click produced which - the stale block read as part
+  of the new answer. Either action now clears the other's result and its error,
+  on click rather than on arrival, so exactly one result is on screen at a time.
+  Both buttons are also disabled while either request is in flight; previously
+  each disabled only itself, so two overlapping uploads could land in arbitrary
+  order and the later reply would overwrite whichever the user asked for last.
+
+### Added
+
+- `voice_transcriber/tests/test_nginx_upload_timeout.py` parses
+  `proxy_read_timeout` back out of `frontend/nginx.conf`'s `/api/` block and
+  re-derives the required headroom from the `soniox_client` timeouts and
+  `_UPLOAD_EXECUTOR`'s worker count. The two numbers are one decision written in
+  two files and two languages with nothing else connecting them; without this,
+  the next person to tune either side silently restores the bug. Pure file
+  parsing - no Docker, nginx, or network - so it runs in the fast suite.
+- `UploadPanel` now shows an indeterminate progress state with a live elapsed
+  count (reusing `useElapsedTimer`) and tells the user long recordings take a
+  few minutes and to keep the tab open. Previously a two-minute wait looked
+  identical to a hang behind a static "Transcribing..." label. Real byte-level
+  progress is deliberately not attempted: `fetch()` cannot report upload
+  progress, so it would mean replacing `fetchBaseQuery` with an XHR base query
+  for this one endpoint.
+
 ## [1.3.6] - 2026-08-28
 
 ### Added
