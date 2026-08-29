@@ -2,6 +2,7 @@ import { useRef, useState, type ReactElement } from "react";
 import type { SerializedError } from "@reduxjs/toolkit";
 import type { FetchBaseQueryError } from "@reduxjs/toolkit/query";
 import { useGetLanguagesQuery } from "@/entities/language/api/languagesApi";
+import { useElapsedTimer } from "@/features/translate/model/useElapsedTimer";
 import { extractApiError } from "@/shared/lib/apiError";
 import {
   useTranscribeTranslateMutation,
@@ -52,6 +53,18 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
   const [transcribe, transcribeState] = useTranscribeTranslateMutation();
   const [transcribeAndTranslate, translateState] = useTranscribeTranslateMutation();
 
+  // Both buttons post to the same endpoint and both are disabled while
+  // either is running (see their `disabled` props), so at most one request
+  // is ever in flight and one timer covers both. That mutual disable is
+  // also what keeps the single-result rule below honest: two overlapping
+  // requests would land in arbitrary order and the later reply would
+  // silently overwrite whichever the user actually asked for last.
+  // Same hook TranslatePage uses for its live-session clock rather than a
+  // second ticking implementation - see useElapsedTimer's own comment on why
+  // a clock stays local state and out of the reducer.
+  const inFlight = transcribeState.isLoading || translateState.isLoading;
+  const elapsed = useElapsedTimer(inFlight);
+
   if (!open) return null;
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -66,9 +79,20 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
     return Number.isFinite(n) && n > 0 ? n : undefined;
   }
 
+  // Exactly one result is on screen at a time: the newest. Each action used
+  // to clear only its own previous output, so a transcription and a
+  // translation could sit stacked on the page with nothing indicating which
+  // click produced which - and the older one looked like part of the new
+  // answer. Clearing happens on click rather than on arrival so the stale
+  // block is gone for the whole wait, matching what each action already did
+  // to its own result. reset() on the other mutation clears its *error* too;
+  // without it a failed Transcribe would keep rendering its message
+  // underneath a perfectly good translation.
   async function doTranscribe() {
     if (!file) return;
     setTranscribeResult(null);
+    setTranslateResult(null);
+    translateState.reset();
     try {
       const json = await transcribe({ file, numSpeakers: parsedNumSpeakers() }).unwrap();
       setTranscribeResult(json.turns);
@@ -80,6 +104,8 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
   async function doTranscribeAndTranslate() {
     if (!file) return;
     setTranslateResult(null);
+    setTranscribeResult(null);
+    transcribeState.reset();
     try {
       const json = await transcribeAndTranslate({
         file,
@@ -156,7 +182,7 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
               type="button"
               className={styles.button}
               onClick={doTranscribe}
-              disabled={!file || transcribeState.isLoading}
+              disabled={!file || inFlight}
             >
               {transcribeState.isLoading ? "Transcribing..." : "Transcribe"}
             </button>
@@ -178,13 +204,34 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
               type="button"
               className={styles.button}
               onClick={doTranscribeAndTranslate}
-              disabled={!file || translateState.isLoading}
+              disabled={!file || inFlight}
             >
               {translateState.isLoading
                 ? "Transcribing & translating..."
                 : "Transcribe & Translate"}
             </button>
           </div>
+
+          {/* The only honest progress this endpoint can show. /api/transcribe*
+              is a single synchronous POST whose whole cost is server-side
+              (Soniox upload, then polling), and fetch() cannot report upload
+              progress at all - a real percentage would mean swapping RTK
+              Query's fetchBaseQuery for an XHR base query on this one
+              endpoint. So: indeterminate, plus a real elapsed count, plus
+              the wait actually named. Left as a bare "Transcribing..." button
+              label, a two-minute wait was indistinguishable from a hang, and
+              closing the tab mid-request is exactly what strands a
+              transcription the backend goes on to finish and bill. */}
+          {inFlight && (
+            <div className={styles.progress} data-testid="upload-progress" role="status">
+              <span className={styles.progressBar} aria-hidden="true" />
+              <span>
+                {transcribeState.isLoading ? "Transcribing" : "Transcribing and translating"}
+                {elapsed ? ` - ${elapsed}` : ""}. Long recordings can take a few minutes; please
+                keep this tab open until it finishes.
+              </span>
+            </div>
+          )}
 
           {transcribeResult && (
             <TranscriptTurns turns={transcribeResult} emptyText="(no transcription)" />

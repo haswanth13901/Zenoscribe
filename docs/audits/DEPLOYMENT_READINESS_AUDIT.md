@@ -229,6 +229,22 @@ remaining). Set it up before go-live, same as P1-C.
   healthcheck status, the same as Caddy did before it. This is what the external
   `/healthz` monitoring in `DEPLOYMENT.md` §3 is for; it needs to actually exist
   operationally.
+- **A client disconnect still leaves a batch upload running and billed.**
+  `POST /api/transcribe` and `/api/transcribe/translate`
+  ([uploads.py:172](../../voice_transcriber/routers/uploads.py#L172),
+  [uploads.py:236](../../voice_transcriber/routers/uploads.py#L236)) await
+  `_transcribe_file_bounded` inside the request, and nothing cancels that work if
+  the caller goes away — if the user closes the tab or their network drops mid-upload,
+  the worker thread runs to completion, `_persist_upload_recording` stores the
+  recording, and Soniox bills for it, with no response ever reaching anyone. This is
+  the residual of the nginx/`BATCH_POLL_TIMEOUT` mismatch fixed in 1.3.7: that bug
+  made the same thing happen *deterministically* at 60s for every upload over a
+  minute; what remains is the genuine-disconnect case, which is rarer and
+  self-inflicted rather than guaranteed. Fixing it properly means the async job API —
+  return a job ID immediately, poll for status — which also removes the
+  three-simultaneous-upload wall `_UPLOAD_EXECUTOR` imposes and makes the two-file
+  timeout invariant unnecessary. Not a launch blocker; the failure is a duplicated
+  charge, not lost or corrupted data.
 - **`@app.on_event` is deprecated but functional.** Confirmed via the exact
   `DeprecationWarning` FastAPI still emits at test time; `fastapi==0.141.1` still supports
   it. Same-effort, no-risk cleanup whenever convenient, not launch-relevant.

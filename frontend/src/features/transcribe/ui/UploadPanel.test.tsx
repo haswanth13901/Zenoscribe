@@ -1,7 +1,7 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { Provider } from "react-redux";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { baseApi } from "@/shared/api/baseApi";
@@ -146,6 +146,91 @@ describe("UploadPanel", () => {
     await waitFor(() => expect(screen.getByText(/504/)).toBeInTheDocument());
     expect(screen.getByText(/timed out/i)).toBeInTheDocument();
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it("Transcribe & Translate replaces the previous transcription rather than stacking under it", async () => {
+    let call = 0;
+    server.use(
+      http.post("/api/transcribe/translate", () => {
+        call += 1;
+        return HttpResponse.json({
+          turns: [{ text: call === 1 ? "plain transcription" : "translated text" }],
+        });
+      }),
+    );
+    renderPanel();
+    await pickFile();
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+    await waitFor(() => expect(screen.getByText("plain transcription")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe & Translate" }));
+    await waitFor(() => expect(screen.getByText("translated text")).toBeInTheDocument());
+    expect(screen.queryByText("plain transcription")).not.toBeInTheDocument();
+  });
+
+  it("Transcribe replaces a previous translation too - only ever one result on screen", async () => {
+    let call = 0;
+    server.use(
+      http.post("/api/transcribe/translate", () => {
+        call += 1;
+        return HttpResponse.json({
+          turns: [{ text: call === 1 ? "translated text" : "plain transcription" }],
+        });
+      }),
+    );
+    renderPanel();
+    await pickFile();
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe & Translate" }));
+    await waitFor(() => expect(screen.getByText("translated text")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+    await waitFor(() => expect(screen.getByText("plain transcription")).toBeInTheDocument());
+    expect(screen.queryByText("translated text")).not.toBeInTheDocument();
+  });
+
+  it("clears the other action's stale error, not just its result", async () => {
+    let call = 0;
+    server.use(
+      http.post("/api/transcribe/translate", () => {
+        call += 1;
+        return call === 1
+          ? HttpResponse.json({ detail: "upstream exploded" }, { status: 502 })
+          : HttpResponse.json({ turns: [{ text: "translated text" }] });
+      }),
+    );
+    renderPanel();
+    await pickFile();
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+    await waitFor(() => expect(screen.getByTestId("upload-transcribe-error")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe & Translate" }));
+    await waitFor(() => expect(screen.getByText("translated text")).toBeInTheDocument());
+    expect(screen.queryByTestId("upload-transcribe-error")).not.toBeInTheDocument();
+  });
+
+  it("shows elapsed time and keep-the-tab-open copy while a transcription is in flight", async () => {
+    server.use(
+      http.post("/api/transcribe/translate", async () => {
+        await delay(200);
+        return HttpResponse.json({ turns: [{ text: "done" }] });
+      }),
+    );
+    renderPanel();
+    await pickFile();
+    await userEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+
+    // The 60s edge timeout this UI was added alongside made a long upload
+    // look like a failure; the point of the banner is that a slow request is
+    // visibly still running, and that closing the tab has a cost.
+    const progress = await screen.findByTestId("upload-progress");
+    expect(progress).toHaveTextContent(/Transcribing - \d\d:\d\d/);
+    expect(progress).toHaveTextContent(/keep this tab open/i);
+
+    await waitFor(() => expect(screen.getByText("done")).toBeInTheDocument());
+    expect(screen.queryByTestId("upload-progress")).not.toBeInTheDocument();
   });
 
   it("transcribe-and-translate passes the selected target language", async () => {
