@@ -13,7 +13,22 @@ WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
 ASYNC_MODEL = "stt-async-v5"
 RT_MODEL = "stt-rt-v5"
-BATCH_POLL_TIMEOUT = 600
+# How long transcribe_file() will keep polling Soniox for a batch job. This
+# is request wall-clock, not background work: routers/uploads.py awaits
+# transcribe_file inside the request, so the caller's browser is holding the
+# connection open for the whole of it. 600s was a placeholder that survived
+# only because nothing ever reached it - nobody waits ten minutes on a spinner.
+#
+# Deliberately NOT env-configurable, unlike UPLOAD_TIMEOUT /
+# POLL_REQUEST_TIMEOUT / TRANSCRIPTION_INIT_TIMEOUT below. Those are
+# independent knobs for one network hop each; this one is half of a
+# two-file invariant with frontend/nginx.conf's `location /api/`
+# proxy_read_timeout, which must always exceed executor queue wait + this.
+# An env var would let an operator raise it at runtime with no corresponding
+# nginx change and no signal - re-creating exactly the 504-while-the-backend-
+# succeeds bug the pair was set up to prevent, in production only, where the
+# test that guards the invariant cannot see it.
+BATCH_POLL_TIMEOUT = 150
 
 # Bounds for the optional speaker-count hint. Soniox diarizes without it, but
 # telling it how many speakers to expect improves separation when it's known

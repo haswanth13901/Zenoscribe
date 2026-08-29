@@ -2,6 +2,7 @@ import { useRef, useState, type ReactElement } from "react";
 import type { SerializedError } from "@reduxjs/toolkit";
 import type { FetchBaseQueryError } from "@reduxjs/toolkit/query";
 import { useGetLanguagesQuery } from "@/entities/language/api/languagesApi";
+import { useElapsedTimer } from "@/features/translate/model/useElapsedTimer";
 import { extractApiError } from "@/shared/lib/apiError";
 import {
   useTranscribeTranslateMutation,
@@ -51,6 +52,14 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
 
   const [transcribe, transcribeState] = useTranscribeTranslateMutation();
   const [transcribeAndTranslate, translateState] = useTranscribeTranslateMutation();
+
+  // Both buttons post to the same endpoint and only one can be in flight at
+  // a time (each disables itself while loading), so one timer covers both.
+  // Same hook TranslatePage uses for its live-session clock rather than a
+  // second ticking implementation - see useElapsedTimer's own comment on why
+  // a clock stays local state and out of the reducer.
+  const inFlight = transcribeState.isLoading || translateState.isLoading;
+  const elapsed = useElapsedTimer(inFlight);
 
   if (!open) return null;
 
@@ -185,6 +194,27 @@ export function UploadPanel({ open }: UploadPanelProps): ReactElement | null {
                 : "Transcribe & Translate"}
             </button>
           </div>
+
+          {/* The only honest progress this endpoint can show. /api/transcribe*
+              is a single synchronous POST whose whole cost is server-side
+              (Soniox upload, then polling), and fetch() cannot report upload
+              progress at all - a real percentage would mean swapping RTK
+              Query's fetchBaseQuery for an XHR base query on this one
+              endpoint. So: indeterminate, plus a real elapsed count, plus
+              the wait actually named. Left as a bare "Transcribing..." button
+              label, a two-minute wait was indistinguishable from a hang, and
+              closing the tab mid-request is exactly what strands a
+              transcription the backend goes on to finish and bill. */}
+          {inFlight && (
+            <div className={styles.progress} data-testid="upload-progress" role="status">
+              <span className={styles.progressBar} aria-hidden="true" />
+              <span>
+                {transcribeState.isLoading ? "Transcribing" : "Transcribing and translating"}
+                {elapsed ? ` - ${elapsed}` : ""}. Long recordings can take a few minutes;
+                please keep this tab open until it finishes.
+              </span>
+            </div>
+          )}
 
           {transcribeResult && (
             <TranscriptTurns turns={transcribeResult} emptyText="(no transcription)" />

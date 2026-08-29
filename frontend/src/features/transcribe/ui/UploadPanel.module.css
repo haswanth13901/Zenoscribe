@@ -64,3 +64,50 @@
   color: var(--err);
   font-size: 13px;
 }
+
+/* Indeterminate, not a percentage: see UploadPanel.tsx's comment on why real
+   byte-level upload progress isn't available through fetch(). The bar only
+   signals "still working"; the elapsed count next to it carries the actual
+   information. */
+.progress {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.progressBar {
+  flex: none;
+  width: 72px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+  position: relative;
+}
+
+.progressBar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: progressSlide 1.1s ease-in-out infinite;
+}
+
+@keyframes progressSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+/* prefers-reduced-motion: the elapsed counter already conveys liveness, so
+   drop the animation rather than substituting another moving thing. */
+@media (prefers-reduced-motion: reduce) {
+  .progressBar::after {
+    animation: none;
+    width: 100%;
+  }
+}
