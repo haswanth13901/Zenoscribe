@@ -42,10 +42,10 @@ httpx==0.28.1
 # fakeredis only supports via the `lua` extra (lupa) - plain `fakeredis`
 # raises "unknown command 'evalsha'" on every request, since
 # GlobalRateLimitMiddleware runs on every route including TestClient calls.
-# Confirmed directly: installing bare fakeredis==2.37.1 (no [lua]/lupa) fails
+# Confirmed directly: installing bare fakeredis==2.38.0 (no [lua]/lupa) fails
 # 69 of the fast suite's 131 tests this way. Both pinned exact, like
 # everything else in this file.
-fakeredis[lua]==2.37.1
+fakeredis[lua]==2.38.0
 lupa==2.8
 
 # Lint. flake8 is also CI's backend-lint gate (blocking) - pinned exact, like
