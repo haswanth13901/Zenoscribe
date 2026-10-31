@@ -32,7 +32,7 @@ RUN npm run build
 # final image - requirements.txt is the production-only dependency set (see
 # that file), which mostly has prebuilt wheels, but this stage stays in
 # place as a safety net for any transitive dep that doesn't.
-FROM python:3.12-slim AS python-deps
+FROM python:3.15-slim AS python-deps
 ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -45,7 +45,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /tmp/requirements.txt
 
 # ---- Stage: common base for both backend targets below ----
-FROM python:3.12-slim AS app-base
+FROM python:3.15-slim AS app-base
 
 # Baked in at build time via --build-arg (docker-compose.prod.yml,
 # release-gate.yml's docker-build job) so a running container can report
